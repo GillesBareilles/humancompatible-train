@@ -4,10 +4,12 @@ import warnings
 import argparse
 import numpy as np
 import time
+import scipy as sp
 from scipy.optimize import linprog
 from qpsolvers import solve_qp
 from ot.utils import unif, dist, list_to_array
 import autoray as ar
+import timeit
 # from .backend import get_backend
 
 
@@ -61,10 +63,10 @@ def computekappa(cval, cgrad, lamb, rho, mc, n, scalef):
 def solvesubp(fgrad, cval, cgrad, kap_val, beta, tau, hesstype, mc, n):
     if hesstype == 'diag':
        # P = tau*nx.eye(n)
-       P = tau*np.identity(n)
+       P = tau*sp.sparse.identity(n, format='csc')
        kap = kap_val * np.ones(mc)
        cval = np.array(cval)
-    return solve_qp(P, fgrad.reshape((n,)), cgrad.reshape((mc, n)), kap-cval, np.zeros((0, n)), np.zeros((0,)), -beta*np.ones((n,)), beta*np.ones((n,)), solver='osqp')
+    return solve_qp(P, fgrad.reshape((n,)), cgrad.reshape((mc, n)), kap-cval, np.zeros((0, n)), np.zeros((0,)), -beta*np.ones((n,)), beta*np.ones((n,)), solver='proxqp')
 
 # initw : Initial parameters of the Network (Weights and Biases)
 
@@ -88,6 +90,7 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
     lossbound = params["lossbound"]
     scalef = params["scalef"]
     
+
     w = initw
     for i in range(len(w)):
         w[i] = ar.to_numpy(w[i])
@@ -114,8 +117,11 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
     #itercs_black = np.zeros((maxiter, mc))
     #itercs_white = np.zeros((maxiter, mc))
     itercs[0,:] = np.max(ceval)
+    
+    iter_avg_time = 0
 
     for iteration in range(0, maxiter):
+        iter_start = timeit.default_timer()
 
         if stepdec == 'dimin':
            gamma = gamma0/(iteration+1)**zeta
@@ -164,7 +170,7 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
         dsol = dsols[0, :] + (dsols[3, :]-0.5*dsols[1, :] -
                               0.5*dsols[2, :])/(geomp*((1-geomp)**Nsamp))
          
-        print(">>>>>step_norm<<<<<<",np.linalg.norm(dsol))
+      #   print(">>>>>Direction norm<<<<<<",np.linalg.norm(dsol))
         #print("ITERATION", iteration)
         #print("step vector is: ")
         # w = w + gamma*dsol
@@ -196,5 +202,7 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
         cons_grad_norm[iteration, :] = np.array([np.linalg.norm(Jeval[i]) for i in range(mc)])
         dir_obj[iteration] = np.dot(fgrad, dsol)
         dir_cons[iteration, :] = np.array([np.dot(Jeval[i], dsol) for i in range(mc)])
-
+        iter_end = timeit.default_timer()
+        iter_avg_time += iter_end - iter_start
+    print(iter_avg_time/iteration)
     return w, iterfs, itercs

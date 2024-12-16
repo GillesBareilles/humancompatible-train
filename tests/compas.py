@@ -296,7 +296,7 @@ if __name__ == "__main__":
         from humancompatible.train.stochastic_ghost import StochasticGhost
 
     loss_bound=2e-3
-    trials = 21
+    trials = 5
     maxiter = 200
     acc_arr = []
     max_acc = 0
