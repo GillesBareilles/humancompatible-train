@@ -9,11 +9,11 @@ import importlib
 
 def printmd(string):
     display(Markdown(string))
-        
 
 from sklearn.preprocessing import StandardScaler 
 
 sys.path.append("..")  # Add parent directory to the sys.path
+pd.options.mode.chained_assignment = None
 
 
 RACE_IND = 4
@@ -295,7 +295,7 @@ if __name__ == "__main__":
         # Default to StochasticGhost optimizer
         from humancompatible.train.stochastic_ghost import StochasticGhost
 
-    loss_bound=2e-3
+    loss_bound=1e-6
     trials = 5
     maxiter = 200
     acc_arr = []
@@ -321,8 +321,6 @@ if __name__ == "__main__":
         #x_len = x_train[:, 4]
         num_trials = min(len(y_train[((x_train[:, RACE_IND]) == SENSITIVE_CODE_1)]), len(y_train[(x_train[:, RACE_IND] == SENSITIVE_CODE_0)]))
 
-
-        print(num_trials)
         #print(num_trials)
         net = CustomNetwork(model_specs)
         operations = Operations(data, net)
@@ -330,7 +328,9 @@ if __name__ == "__main__":
         initw, num_param = net.get_trainable_params()
         params = paramvals(maxiter=maxiter, beta=10., rho=1e-3, lamb=0.5, hess='diag', tau=2., mbsz=100,
                         numcon=2, geomp=0.2, stepdecay='dimin', gammazero=0.1, zeta=0.7, N=num_trials, n=num_param, lossbound=[loss_bound, loss_bound], scalef=[1., 1.])
-        w, iterfs, itercs = StochasticGhost(operations.obj_fun, operations.obj_grad, [operations.conf1, operations.conf2], [operations.conJ1, operations.conJ2], initw, params)
+        solver_params = {'max_iter': 400, 'eps_abs': 1e-9, 'polish': True, 'eps_prim_inf': 1e-6, 'eps_dual_inf': 1e-6}
+        w, iterfs, itercs = StochasticGhost(operations.obj_fun, operations.obj_grad, [operations.conf1, operations.conf2], [operations.conJ1, operations.conJ2],
+                                            initw, params, solver_params=solver_params)
         
         if np.isnan(w[0]).any():
             print("reached infeasibility not saving the model")
@@ -355,6 +355,9 @@ if __name__ == "__main__":
     ctrial1 = np.array(ctrial1).T
     ctrial2 = np.array(ctrial2).T
     print(">>>>>>>>>>>>>>>>>>>Completed trials<<<<<<<<<<<<<<<<")
+    print(f'Avg loss: {np.mean(ftrial)}')
+    print(f'Avg с1: {np.mean(ctrial1)}')
+    print(f'Avg с2: {np.mean(ctrial2)}')
     #print(acc_arr)
     df_ftrial = pd.DataFrame(ftrial, columns=range(1, ftrial.shape[1]+1), index=range(1, ftrial.shape[0]+1))
     df_ctrial1 = pd.DataFrame(ctrial1, columns=range(1, ctrial1.shape[1]+1), index=range(1, ctrial1.shape[0]+1))

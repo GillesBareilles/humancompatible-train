@@ -60,18 +60,30 @@ def computekappa(cval, cgrad, lamb, rho, mc, n, scalef):
 #     return solve_qp(P, fgrad.reshape((n,)), cgrad.reshape((mc, n)), list_to_array([(kap-cval)]), np.zeros((0, n)), np.zeros((0,)), -beta*np.ones((n,)), beta*np.ones((n,)), solver='osqp')
 
 
-def solvesubp(fgrad, cval, cgrad, kap_val, beta, tau, hesstype, mc, n):
+def solvesubp(fgrad, cval, cgrad, kap_val, beta, tau, hesstype, mc, n, qp_solver='osqp', solver_params={}):
     if hesstype == 'diag':
        # P = tau*nx.eye(n)
        P = tau*sp.sparse.identity(n, format='csc')
        kap = kap_val * np.ones(mc)
        cval = np.array(cval)
-    return solve_qp(P, fgrad.reshape((n,)), cgrad.reshape((mc, n)), kap-cval, np.zeros((0, n)), np.zeros((0,)), -beta*np.ones((n,)), beta*np.ones((n,)), solver='proxqp')
+   #  print(*solver_params)
+    return solve_qp(
+      P,
+      fgrad.reshape((n,)),
+      cgrad.reshape((mc, n)),
+      kap-cval,
+      np.zeros((0, n)),
+      np.zeros((0,)),
+      -beta*np.ones((n,)),
+      beta*np.ones((n,)),
+      qp_solver,
+      **solver_params)
+      # solver='clarabel', max_iter=100)
 
 # initw : Initial parameters of the Network (Weights and Biases)
 
 
-def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
+def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params, solver_params):
     N = params["N"]
     n = params["n"]  
     maxiter = params["maxiter"]
@@ -156,7 +168,6 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
             #ceval[i] = np.max(conf(w, mbatches[j]) - lossbound[i], 0)
             ceval[i] = np.max(conf(w, mbatches[j]) - lossbound[i], 0)
             Jeval[i, :] = ar.to_numpy(conJ(w, mbatches[j]))
-            
             #print(type(Jeval[i, :]))
             # cval = nx.concatenate((cval, ceval[i]))
             # cgrad = nx.concatenate((cgrad, Jeval[i, :]))
@@ -164,7 +175,7 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
           # Compute Kappa for the Subproblem bound   
           kap = computekappa(ceval, Jeval, rho, lamb, mc, n, scalef)
           # Solving the subproblem
-          dsol = solvesubp(fgrad, ceval, Jeval, kap, beta, tau, hess, mc, n)
+          dsol = solvesubp(fgrad, ceval, Jeval, kap, beta, tau, hess, mc, n, qp_solver='osqp', solver_params=solver_params)
           dsols[j, :] = dsol
 
         dsol = dsols[0, :] + (dsols[3, :]-0.5*dsols[1, :] -
@@ -204,5 +215,5 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params):
         dir_cons[iteration, :] = np.array([np.dot(Jeval[i], dsol) for i in range(mc)])
         iter_end = timeit.default_timer()
         iter_avg_time += iter_end - iter_start
-    print(iter_avg_time/iteration)
+    print(f'Avg iter time: {iter_avg_time/iteration}')
     return w, iterfs, itercs
