@@ -109,8 +109,6 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params, solve
 
     feval = obj_fun(w, mbsz)  
     ceval = np.zeros((mc,))
-    #ceval_white = np.zeros((mc,))
-    #ceval_black = np.zeros((mc,))
     Jeval = np.zeros((mc, n))
 
     # Getting all the constraints
@@ -122,12 +120,8 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params, solve
     cons_grad_norm = np.zeros((maxiter, mc))
     for i in range(mc):
        conf = con_funs[i]
-       #ceval[i] = np.max(conf(w, mbsz), 0)
        ceval[i] = np.max(conf(w, mbsz), 0)
-    #itercs = np.zeros((maxiter,))
     itercs = np.zeros((maxiter, mc))
-    #itercs_black = np.zeros((maxiter, mc))
-    #itercs_white = np.zeros((maxiter, mc))
     itercs[0,:] = np.max(ceval)
     
     iter_avg_time = 0
@@ -156,21 +150,14 @@ def StochasticGhost(obj_fun, obj_grad, con_funs, con_grads, initw, params, solve
         for j in range(4):
           feval = obj_fun(w, mbatches[j])
           fgrad = ar.to_numpy(obj_grad(w, mbatches[j]))
-          #print(type(fgrad))
-          # cval = []
-          # cgrad = []
           for i in range(mc):
             # con_funs[i](conf) and con_grads[i](conJ) ith constraint and constraint grad
             conf = con_funs[i]
             conJ = con_grads[i]
             # ceval and Jeval are evaluations of ith constraint and constraint grads for the parameter values
             # nx.max(conf(w,mbatches[j]),0) to ensure the problem is always in the feasible region
-            #ceval[i] = np.max(conf(w, mbatches[j]) - lossbound[i], 0)
             ceval[i] = np.max(conf(w, mbatches[j]) - lossbound[i], 0)
             Jeval[i, :] = ar.to_numpy(conJ(w, mbatches[j]))
-            #print(type(Jeval[i, :]))
-            # cval = nx.concatenate((cval, ceval[i]))
-            # cgrad = nx.concatenate((cgrad, Jeval[i, :]))
 
           # Compute Kappa for the Subproblem bound   
           kap = computekappa(ceval, Jeval, rho, lamb, mc, n, scalef)
