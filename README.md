@@ -26,10 +26,9 @@ qpsolvers
 autoray
 pytorch
 tensorflow
-StochasticGhost
 
 
-Running the benchmark:
+Running the benchmark (run from tests folder to avoid errors, to be fixed later!):
 
 python income.py --model "{backend name}" --optimizer "{optimizer name}"
 
@@ -39,8 +38,4 @@ python income.py --help
 
 model values: pytorch_connect, tensorflow_connect
 optimizer values: StochasticGhost
-
-installations: 
-
-> pip install StochasticGhost
 
