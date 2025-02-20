@@ -175,9 +175,7 @@ if __name__ == "__main__":
     layer_sizes = [ip_size, hid_size1, hid_size2, op_size]
     model_specs = (layer_sizes,)
     
-    sampling_int = 'exp'
-    loss_bound = 1e-2
-    epochs = 5*15
+    epochs = 5*20
     loss = BCELoss()
 
     from torch.optim import Adam

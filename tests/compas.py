@@ -298,7 +298,7 @@ if __name__ == "__main__":
     
     loss_bound=1e-2
     trials = 5
-    maxiter = 200
+    maxiter = 500
     acc_arr = []
     max_acc = 0
     # ftrial = np.zeros((maxiter))
