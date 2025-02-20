@@ -125,8 +125,6 @@ class Operations:
         self.oval = data[3]
         self.itrain_raw = data[4]
         self.model = net
-    
-
 
     def obj_fun(self, params, minibatch):
         x = self.itrain
@@ -134,10 +132,7 @@ class Operations:
         model = self.model
         #x_black = x[:, ]
         samples = np.random.choice(len(y), minibatch, replace=False)
-
         fval = model.get_obj(x[samples, :], y[samples], params)
-        
-        
         return fval
 
     def obj_grad(self, params, minibatch):
@@ -150,8 +145,6 @@ class Operations:
         fgrad = model.get_obj_grad(x[samples, :], y[samples], params)
 
         return fgrad
-    
-
 
     def conf1(self, params, minibatch):
         #print("Reached at function constraint")
@@ -169,10 +162,7 @@ class Operations:
 
         white_samples = np.random.choice(len(y_white), minibatch, replace=False)
    
-
         conf1 = model.get_constraint(x_black[black_samples, :], y_train[black_samples], x_white[white_samples, :], y_train[white_samples], params)
-   
-        
         return conf1
     
     def conJ1(self, params, minibatch):
@@ -210,7 +200,6 @@ class Operations:
         black_samples = np.random.choice(len(y_black), minibatch, replace=False)
 
         white_samples = np.random.choice(len(y_white), minibatch, replace=False)
-    
 
         conf2 = model.get_constraint(x_white[white_samples, :], y_train[white_samples], x_black[black_samples, :], y_train[black_samples], params)
         
@@ -234,7 +223,6 @@ class Operations:
 
         conj2 = model.get_constraint_grad(x_white[white_samples, :], y_train[white_samples], x_black[black_samples, :], y_train[black_samples], params)
         #conj2 = model.get_grads(conf2, params)
-
         
         return conj2
     
@@ -262,8 +250,22 @@ def paramvals(maxiter, beta, rho, lamb, hess, tau, mbsz, numcon, geomp, stepdeca
 
 
 if __name__ == "__main__":
-    ######Training loop######
+
     x_train, X_train, y_train, X_val, y_val = preprocess_data()
+
+
+    ## add bias to data
+    white_idx = (x_train[:, RACE_IND] == SENSITIVE_CODE_1)
+    black_idx = (x_train[:, RACE_IND] == SENSITIVE_CODE_0)
+    x_black = X_train[black_idx, :]
+    y_black = y_train[black_idx]
+    x_white = X_train[white_idx, :]
+    y_white = y_train[white_idx]
+    
+    X_train = np.concatenate([x_white, x_black[:160]])
+    y_train = np.concatenate([y_white, y_black[:160]])
+
+    x_train = np.concatenate((x_train[white_idx], x_train[black_idx][:160]))
 
     parser = argparse.ArgumentParser(description="Dynamically import the model class")
 
@@ -278,24 +280,23 @@ if __name__ == "__main__":
     optimizer_name = args.optimizer
     parent_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path.append(os.path.abspath(os.path.join(parent_dir, "../humancompatible/train")))
+
     # Dynamically import the specified module
-    if model_name:
-        model = importlib.import_module(model_name)
-
-        # Get the specified function from the imported module
-        CustomNetwork = getattr(model, "CustomNetwork")
-    else:
+    if not model_name:
         # Import the default module if no module name is provided
-        print("Please specify the model architecture")
+        print("Architecture not specified, defaulting to PyTorch ('pytorch_connect')")
+        model_name = 'pytorch_connect'
     
+    os.chdir(os.path.join(os.getcwd(), 'tests'))
+    print(f'working in: {os.getcwd()}')
 
-    if optimizer_name:
-        optimizer = importlib.import_module(optimizer_name)
-    else:
-        # Default to StochasticGhost optimizer
-        from humancompatible.train.stochastic_ghost import StochasticGhost
+    model = importlib.import_module(model_name)
+    CustomNetwork = getattr(model, "CustomNetwork")
 
-    loss_bound=1e-6
+    optimizer = importlib.import_module('stochastic_ghost')
+    StochasticGhost = getattr(optimizer, 'StochasticGhost')
+    
+    loss_bound=1e-2
     trials = 5
     maxiter = 200
     acc_arr = []
@@ -316,6 +317,7 @@ if __name__ == "__main__":
         hid_size2 = 16
         op_size = 1
         layer_sizes = [ip_size, hid_size1, hid_size2, op_size]
+        
         data = (X_train[:, :ip_size], y_train, X_val[:, :ip_size], y_val, x_train)
         model_specs = (layer_sizes,)
         #x_len = x_train[:, 4]
@@ -340,7 +342,7 @@ if __name__ == "__main__":
             ctrial2.append(itercs[:,1])
 
             saved_model.append(net)
-            directory = "../saved_models/"+str(model_name)
+            directory = "../saved_models/compas/" + model_name
 
             # Check if the directory exists
             if not os.path.exists(directory):
@@ -348,9 +350,9 @@ if __name__ == "__main__":
                 os.makedirs(directory)
 
             # Save the model
-            model_path = os.path.join(directory, f'saved_model_compas{trial}')
+            model_path = os.path.join(directory, f'net_ghost_compas_lb{loss_bound}_tr{trial}')
             net.save_model(model_path)
-    
+        
     ftrial = np.array(ftrial).T
     ctrial1 = np.array(ctrial1).T
     ctrial2 = np.array(ctrial2).T

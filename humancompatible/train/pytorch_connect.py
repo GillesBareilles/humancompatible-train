@@ -25,17 +25,15 @@ class CustomNetwork(nn.Module):
             x = torch.relu((layer(x)))
         x = torch.sigmoid(self.layers[-1](x))
         return x
-    
-    
 
     ######Only this loss function is used here######
     def compute_loss(self, Y, Y_hat):
-        L_sum = 0.5*torch.sum(torch.square(Y - Y_hat))
+        # L_sum = 0.5*torch.sum(torch.square(Y - Y_hat))
 
-        m = Y.shape[0]
+        # m = Y.shape[0]
         # print("Y shape is: ", m)
-        L = (1./m) * L_sum
-
+        # L = (1./m) * L_sum
+        L = self.bce_loss(Y, Y_hat)
         return L
 
     def bce_loss(self, outputs, targets):
