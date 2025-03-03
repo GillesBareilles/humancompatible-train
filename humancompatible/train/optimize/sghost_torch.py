@@ -47,7 +47,7 @@ def SampleFromDataLoader(dataloader, d_iterator, size):
         
 
 def net_grads_to_tensor(net) -> torch.Tensor:
-    pass
+        
 
 class StochasticGhost:
     def __init__(self,
