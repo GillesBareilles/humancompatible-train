@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch import tensor, nn
 from torch.utils.data import TensorDataset, DataLoader
+        
+from src.algos.auglag import AugLagr
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
@@ -40,7 +42,7 @@ def one_sided_loss_constr(loss, net, c_data):
 
 if __name__ == "__main__":
     
-    DATASET_NAME = 'employment_TEST1CONSTR'
+    DATASET_NAME = 'employment'
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME)
@@ -73,8 +75,6 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        from src.algos.al_simple import AugLagr
-        
         history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=16, loss_bound=LOSS_BOUND, maxiter=np.inf,
                           update_lambda=UPDATE_LAMBDA)
         
@@ -94,26 +94,6 @@ if __name__ == "__main__":
     if not os.path.exists(utils_path):
         os.makedirs(utils_path)
     
-    # maxlen = 0
-    # for f, c in zip(ftrial, ctrial):
-    #     if len(f) > maxlen:
-    #         maxlen = len(f)
-    # for t, f in enumerate(ftrial):
-    #     try:
-    #         ftrial[t] = np.pad(np.array(ftrial[t]), pad_width=(0, maxlen-len(ftrial[t])))
-    #         ctrial[t] = np.pad(np.array(ctrial[t]), pad_width=((0, maxlen-len(ctrial[t])), (0,0)))
-    #     except:
-    #         print('oi')
-
-    # ftrial = np.array(ftrial).T
-    # ctrial = np.array(ctrial).T
-        
-    # df_ftrial = pd.DataFrame(ftrial, columns=range(1, ftrial.shape[1]+1), index=range(1, ftrial.shape[0]+1))
-    # df_ftrial.to_csv(os.path.join(utils_path, f'{ALG_NAME}_{DATASET_NAME}_ftrial_'+str(LOSS_BOUND)+'.csv'))
-    # for exp_idx, ctrial_i in enumerate(ctrial):
-    #     df_ctrial = pd.DataFrame(ctrial_i, columns=range(1, ctrial_i.shape[1]+1), index=range(1, ctrial_i.shape[0]+1))
-    #     df_ctrial.to_csv(os.path.join(utils_path, f'{ALG_NAME}_{DATASET_NAME}_ctrial_{LOSS_BOUND}_{exp_idx}.csv'))        
-
     print('----')
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
