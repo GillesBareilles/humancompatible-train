@@ -1,7 +1,6 @@
 # Dataset and saved models
 
 src/experiments/utils/raw_data/
-src/experiments/utils/saved_models/
 
 
 # Byte-compiled / optimized / DLL files
