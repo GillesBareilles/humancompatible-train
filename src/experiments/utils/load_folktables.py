@@ -11,7 +11,7 @@ from folktables import ACSDataSource, ACSPublicCoverage, ACSEmployment
 
 RAC1P_WHITE = 1
 
-def load_coverage_torch(dataset: str = 'employment', state='AL', random_state=None, make_unbalanced=False):
+def load_folktables_torch(dataset: str = 'employment', state='AL', random_state=None, make_unbalanced=False):
     data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'raw_data', dataset))
     data_source = ACSDataSource(survey_year=2018, horizon='1-Year', survey='person', root_dir=data_dir)
     acs_data = data_source.get_data(states=[state], download=True)

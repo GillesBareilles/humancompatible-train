@@ -1,7 +1,7 @@
 import os
 import sys
 import pandas as pd
-from utils.load_folktables import load_coverage, load_coverage_torch
+from utils.load_folktables import load_folktables_torch
 import numpy as np
 import torch
 from torch import tensor, nn
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_coverage_torch(
+    X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
         'employment', state='AL', random_state=0, make_unbalanced = False
     )
         
