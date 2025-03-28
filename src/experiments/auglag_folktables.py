@@ -59,7 +59,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
-    EXP_NUM = 30
+    EXP_NUM = 10
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     ALG_NAME = 'al'
@@ -117,9 +117,12 @@ if __name__ == "__main__":
     X_train_nw = X_train_tensor[nw_idx_train]
     y_train_nw = y_train_tensor[nw_idx_train]
     
+    every_x_iter = 1
+    
     with torch.no_grad():
         for exp_idx in range(EXP_NUM):
-            for alg_iteration, w in enumerate(wtrial[exp_idx]):
+            for alg_iteration, w in enumerate(wtrial[exp_idx][::every_x_iter]):
+                print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
                 
                 outs = net(X_train_tensor)

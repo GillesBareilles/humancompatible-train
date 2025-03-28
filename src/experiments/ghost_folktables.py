@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.ghost import StochasticGhost
+from src.algos.ghost import StochasticGhost_OddEven
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
@@ -59,10 +59,11 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
-    EXP_NUM = 10
-    LOSS_BOUND = 0.001
+    EXP_NUM = 15
+    LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     ALG_NAME = 'sg'
+    geomp = 0.05
     
     ftrial, ctrial, wtrial = [], [], []
     
@@ -70,12 +71,10 @@ if __name__ == "__main__":
     for EXP_IDX in range(EXP_NUM):
         
         net = SimpleNet(in_shape=X_test.shape[1], out_shape=1)
-
-        geomp = 0.2
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
+        history = StochasticGhost_OddEven(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
                                   geomp=geomp, loss_bound=LOSS_BOUND, maxiter=400)
         
         ## SAVE RESULTS ##
@@ -122,6 +121,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         for exp_idx in range(EXP_NUM):
             for alg_iteration, w in enumerate(wtrial[exp_idx]):
+                print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
                 
                 outs = net(X_train_tensor)
