@@ -6,11 +6,11 @@ import numpy as np
 import torch
 from torch import tensor, nn
 from torch.utils.data import TensorDataset, DataLoader
-        
-from src.algos.ghost import StochasticGhost
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
+        
+from src.algos.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):

@@ -6,11 +6,11 @@ import numpy as np
 import torch
 from torch import tensor, nn
 from torch.utils.data import TensorDataset, DataLoader
-        
-from src.algos.auglag import AugLagr
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
+        
+from src.algos.auglag import AugLagr
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
@@ -50,7 +50,7 @@ if __name__ == "__main__":
         os.makedirs(directory)
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        'employment', state='AL', random_state=0, make_unbalanced = False
+        'employment', state='AL', random_state=42, make_unbalanced = False
     )
         
     X_train_tensor = tensor(X_train, dtype=torch.float)
@@ -59,10 +59,10 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
-    EXP_NUM = 10
-    LOSS_BOUND = 0.001
+    EXP_NUM = 30
+    LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
-    ALG_NAME = 'al_simple'
+    ALG_NAME = 'al'
     UPDATE_LAMBDA = True
     
        
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=16, loss_bound=LOSS_BOUND, maxiter=np.inf,
+        history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=8, loss_bound=LOSS_BOUND, maxiter=np.inf,
                           update_lambda=UPDATE_LAMBDA)
         
         ## SAVE RESULTS ##
