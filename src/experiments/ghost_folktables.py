@@ -46,20 +46,20 @@ if __name__ == "__main__":
     FT_DATASET, FT_STATE = DATASET_NAME.split('_')
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        FT_DATASET, state=FT_STATE, random_state=42, make_unbalanced = False
+        FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False
     )
         
     X_train_tensor = tensor(X_train, dtype=torch.float)
     y_train_tensor = tensor(y_train, dtype=torch.float)
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
-    train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
     EXP_NUM = 30
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
-    ALG_NAME = 'sg'
-    geomp = 0.05
+    ALG_NAME = 'sg_oe'
+    MAXITER = 600
+    geomp = 0.2
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
@@ -75,9 +75,13 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
-                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=400)
-        
+        if ALG_NAME == 'sg':
+            history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
+                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=42)
+        elif ALG_NAME == 'sg_oe':
+            history = StochasticGhost_OddEven(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
+                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER)
+            
         ## SAVE RESULTS ##
         ftrial.append(history['loss'])
         ctrial.append(history['constr'])

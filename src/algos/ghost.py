@@ -65,7 +65,7 @@ def one_sided_loss_constr(loss, net, c_data):
 
 
 def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
-                    zeta=0.7, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.):
+                    zeta=0.7, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2., random_state=42):
     
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -91,7 +91,7 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
     
     n = sum(p.numel() for p in net.parameters())
     
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed=random_state)
     
     run_start = timeit.default_timer()
     
@@ -182,7 +182,7 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
 
 
 def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
-                    zeta=0.7, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.):
+                    zeta=0.7, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.,random_state=42):
     
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -202,13 +202,10 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
                'cgrad_norm': [], 
                'loss_after': [], 
                'constr_after': []}
-
-    if isinstance(data, torch.utils.data.Dataset):
-        obj_dataloader = torch.utils.data.DataLoader(data,batch_size=1)
     
     n = sum(p.numel() for p in net.parameters())
     
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed=random_state)
     
     run_start = timeit.default_timer()
     
@@ -227,7 +224,7 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
         while (2**(Nsamp+1)) > max_sample_size:
             Nsamp = rng.geometric(p=geomp)
     
-        mbatches = [1, 2**(Nsamp+1), 2**(Nsamp+1)]
+        mbatches = [1, 2**(Nsamp+1)]
         dsols = np.zeros((4, n))
         # for each subproblem:
         # same samples for each constraint? or no?
@@ -239,10 +236,13 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
             if j == 1:
                 indices_f.append(idx_f[::2]) # even
                 indices_f.append(idx_f[1::2]) # odd
+                indices_f.append(idx_f) # all
                 indices_c_w.append(idx_c_w[::2]) # even
                 indices_c_w.append(idx_c_w[1::2]) # odd
+                indices_c_w.append(idx_c_w) # all
                 indices_c_b.append(idx_c_b[::2]) # even
                 indices_c_b.append(idx_c_b[1::2]) # odd
+                indices_c_b.append(idx_c_b) # all
             else:
                 indices_f.append(idx_f)
                 indices_c_w.append(idx_c_w)

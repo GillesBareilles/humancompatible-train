@@ -52,14 +52,15 @@ if __name__ == "__main__":
     X_train_tensor = tensor(X_train, dtype=torch.float)
     y_train_tensor = tensor(y_train, dtype=torch.float)
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
-    train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
     EXP_NUM = 30
     LOSS_BOUND = 0.001
     RUNTIME_LIMIT = 15
-    ALG_NAME = 'al'
     UPDATE_LAMBDA = True
+    ALG_TYPE = 'AUG' if UPDATE_LAMBDA else 'PEN'
+    
+    torch.manual_seed(42)
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
@@ -85,8 +86,7 @@ if __name__ == "__main__":
         
 
         # Save the model
-        alg_type = 'AUG' if UPDATE_LAMBDA else 'PEN'
-        model_path = os.path.join(directory, f'{alg_type}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
+        model_path = os.path.join(directory, f'{ALG_TYPE}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
         torch.save(net.state_dict(), model_path)
         print('')
     
@@ -143,4 +143,4 @@ if __name__ == "__main__":
                 full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
             
     
-    full_stats.to_csv(os.path.join(utils_path, f'{alg_type}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))
+    full_stats.to_csv(os.path.join(utils_path, f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

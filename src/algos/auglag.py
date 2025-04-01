@@ -50,7 +50,7 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
     data_w = torch.utils.data.Subset(data, w_ind)
     data_b = torch.utils.data.Subset(data, b_ind)    
-    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True)
+    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, )
     loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True))
     loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True))
     
