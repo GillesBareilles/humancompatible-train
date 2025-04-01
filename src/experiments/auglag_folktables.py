@@ -42,15 +42,11 @@ def one_sided_loss_constr(loss, net, c_data):
 
 if __name__ == "__main__":
     
-    DATASET_NAME = 'employment'
-    
-    saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
-    directory = os.path.join(saved_models_path, DATASET_NAME)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    DATASET_NAME = 'employment_az'
+    FT_DATASET, FT_STATE = DATASET_NAME.split('_')
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        'employment', state='AL', random_state=42, make_unbalanced = False
+        FT_DATASET, state=FT_STATE, random_state=42, make_unbalanced = False
     )
         
     X_train_tensor = tensor(X_train, dtype=torch.float)
@@ -59,13 +55,17 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
-    EXP_NUM = 10
-    LOSS_BOUND = 0.005
+    EXP_NUM = 30
+    LOSS_BOUND = 0.001
     RUNTIME_LIMIT = 15
     ALG_NAME = 'al'
     UPDATE_LAMBDA = True
     
-       
+    saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
+    directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
     ftrial, ctrial, wtrial = [], [], []
     
     # experiment loop
@@ -85,7 +85,8 @@ if __name__ == "__main__":
         
 
         # Save the model
-        model_path = os.path.join(directory, f'{ALG_NAME}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
+        alg_type = 'AUG' if UPDATE_LAMBDA else 'PEN'
+        model_path = os.path.join(directory, f'{alg_type}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
         torch.save(net.state_dict(), model_path)
         print('')
     
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     
     every_x_iter = 1
     
-    with torch.no_grad():
+    with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
             for alg_iteration, w in enumerate(wtrial[exp_idx][::every_x_iter]):
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
@@ -141,5 +142,5 @@ if __name__ == "__main__":
                 
                 full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
             
-    alg_type = 'AUG' if UPDATE_LAMBDA else 'PEN'
+    
     full_stats.to_csv(os.path.join(utils_path, f'{alg_type}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

@@ -64,7 +64,7 @@ def one_sided_loss_constr(loss, net, c_data):
 
 
 
-def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
+def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
                     zeta=0.7, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.):
     
     
@@ -234,7 +234,7 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
         indices_f, indices_c_w, indices_c_b = [],[],[]
         for j, subp_batch_size in enumerate(mbatches):
             idx_f = rng.choice(len(data), size=subp_batch_size)
-            idx_c_w = rng.choice(len(data_w), size=subp_batch_size)    
+            idx_c_w = rng.choice(len(data_w), size=subp_batch_size)
             idx_c_b = rng.choice(len(data_b), size=subp_batch_size)
             if j == 1:
                 indices_f.append(idx_f[::2]) # even

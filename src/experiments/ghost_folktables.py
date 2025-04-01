@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.ghost import StochasticGhost_OddEven
+from src.algos.ghost import StochasticGhost, StochasticGhost_OddEven
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
@@ -42,15 +42,11 @@ def one_sided_loss_constr(loss, net, c_data):
 
 if __name__ == "__main__":
     
-    DATASET_NAME = 'employment'
-    
-    saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
-    directory = os.path.join(saved_models_path, DATASET_NAME)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    DATASET_NAME = 'employment_az'
+    FT_DATASET, FT_STATE = DATASET_NAME.split('_')
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        'employment', state='AL', random_state=0, make_unbalanced = False
+        FT_DATASET, state=FT_STATE, random_state=42, make_unbalanced = False
     )
         
     X_train_tensor = tensor(X_train, dtype=torch.float)
@@ -59,11 +55,16 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
     
     # TODO: move to command line args
-    EXP_NUM = 15
+    EXP_NUM = 30
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     ALG_NAME = 'sg'
     geomp = 0.05
+    
+    saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
+    directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
+    if not os.path.exists(directory):
+        os.makedirs(directory)
     
     ftrial, ctrial, wtrial = [], [], []
     
@@ -74,7 +75,7 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = StochasticGhost_OddEven(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
+        history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
                                   geomp=geomp, loss_bound=LOSS_BOUND, maxiter=400)
         
         ## SAVE RESULTS ##
@@ -84,7 +85,7 @@ if __name__ == "__main__":
         
 
         # Save the model
-        model_path = os.path.join(directory, f'{ALG_NAME}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
+        model_path = os.path.join(directory, f'{ALG_NAME}_{LOSS_BOUND}_trial{EXP_IDX}_p{geomp}.pt')
         torch.save(net.state_dict(), model_path)
         print('')
    
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     X_train_nw = X_train_tensor[nw_idx_train]
     y_train_nw = y_train_tensor[nw_idx_train]
     
-    with torch.no_grad():
+    with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
             for alg_iteration, w in enumerate(wtrial[exp_idx]):
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
