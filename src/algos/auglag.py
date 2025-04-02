@@ -40,7 +40,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
                 lambda_bound = 1e3,
                 pmult_bound = 1e3,
                 start_lambda=None,
-                update_lambda=True):
+                update_lambda=True,
+                update_pen = True):
         
     history = {'loss': [],
                'constr': [],
@@ -59,7 +60,10 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     n = sum(p.numel() for p in net.parameters())
     
     _lambda = torch.zeros(2) if start_lambda is None else start_lambda
-    c = torch.ones_like(_lambda)
+    if update_pen:
+        c = torch.ones_like(_lambda)
+    else:
+        c = torch.ones_like(_lambda) * 50
     beta = 2.
     p = 2.
     
@@ -91,8 +95,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         L.backward()
         optimizer.step()        
         
-        print(f'{iteration}|{loss_eval.detach().numpy()}|{_lambda.detach().numpy()}|{constraint_eval}|{c.detach().numpy()}', end='\r')
-        
+        # print(f'{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval}|{c.detach().cpu().numpy()}', end='\r')
+        print(f'{iteration}', end='\r')        
         # recalculate objective and constraint values based on updated network weights
         
         constraint_eval_updated = torch.tensor([c1(net, [w_sample, b_sample]), c2(net, [w_sample, b_sample])])

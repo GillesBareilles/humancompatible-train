@@ -46,21 +46,20 @@ if __name__ == "__main__":
     FT_DATASET, FT_STATE = DATASET_NAME.split('_')
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        FT_DATASET, state=FT_STATE, random_state=42, make_unbalanced = False
+        FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False
     )
         
-    X_train_tensor = tensor(X_train, dtype=torch.float)
-    y_train_tensor = tensor(y_train, dtype=torch.float)
+    X_train_tensor = tensor(X_train, dtype=torch.float).cuda()
+    y_train_tensor = tensor(y_train, dtype=torch.float).cuda()
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
     EXP_NUM = 30
-    LOSS_BOUND = 0.001
+    LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
     ALG_TYPE = 'AUG' if UPDATE_LAMBDA else 'PEN'
-    
-    torch.manual_seed(42)
+    BATCH_SIZE = 8
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
@@ -72,11 +71,13 @@ if __name__ == "__main__":
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
         
-        net = SimpleNet(in_shape=X_test.shape[1], out_shape=1)
+        torch.manual_seed(EXP_IDX)
+        
+        net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=8, loss_bound=LOSS_BOUND, maxiter=np.inf,
+        history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=BATCH_SIZE, loss_bound=LOSS_BOUND, maxiter=np.inf,
                           update_lambda=UPDATE_LAMBDA)
         
         ## SAVE RESULTS ##
@@ -99,14 +100,14 @@ if __name__ == "__main__":
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
     index = pd.MultiIndex.from_product([['train', 'test'], np.arange(wlen), np.arange(EXP_NUM)], names=('is_train', 'iteration', 'trial'))
-    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2'])
+    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize'])
     full_stats.sort_index(inplace=True)
     
-    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1)
+    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
     loss_fn = nn.BCEWithLogitsLoss()
     
-    X_test_tensor = tensor(X_test, dtype=torch.float)
-    y_test_tensor = tensor(y_test, dtype=torch.float)
+    X_test_tensor = tensor(X_test, dtype=torch.float).cuda()
+    y_test_tensor = tensor(y_test, dtype=torch.float).cuda()
     
     X_test_w = X_test_tensor[w_idx_test]
     y_test_w = y_test_tensor[w_idx_test]
@@ -119,28 +120,30 @@ if __name__ == "__main__":
     y_train_nw = y_train_tensor[nw_idx_train]
     
     every_x_iter = 1
-    
+    save_train = False
     with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
-            for alg_iteration, w in enumerate(wtrial[exp_idx][::every_x_iter]):
+            for alg_iteration, w in enumerate(wtrial[exp_idx]):
+
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
                 
-                outs = net(X_train_tensor)
-                loss = loss_fn(outs, y_train_tensor.unsqueeze(1)).detach().numpy()
-                
-                c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().numpy()
-                c2 = -c1
-                # pandas multiindex bug(?) workaround
-                full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
-                
+                if save_train:
+                    outs = net(X_train_tensor)
+                    loss = loss_fn(outs, y_train_tensor.unsqueeze(1)).detach().cpu().numpy()
+                    
+                    c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().cpu().numpy()
+                    c2 = -c1
+                    # pandas multiindex bug(?) workaround
+                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE}
+                    
                 outs = net(X_test_tensor)
-                loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().numpy()
+                loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().cpu().numpy()
                 
-                c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().numpy()
+                c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE}
             
     
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

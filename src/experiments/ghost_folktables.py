@@ -58,15 +58,15 @@ if __name__ == "__main__":
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     ALG_NAME = 'sg_oe'
-    MAXITER = 600
-    geomp = 0.2
+    MAXITER = 1000
+    geomp = 0.1
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    ftrial, ctrial, wtrial = [], [], []
+    ftrial, ctrial, wtrial, nsamp = [], [], [], []
     
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
@@ -75,23 +75,25 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
+        random_seed = EXP_IDX*2
+                
         if ALG_NAME == 'sg':
             history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
-                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=42)
-        elif ALG_NAME == 'sg_oe':
+                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
+        elif ALG_NAME.startswith('sg_oe'):
             history = StochasticGhost_OddEven(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
-                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER)
+                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
             
         ## SAVE RESULTS ##
         ftrial.append(history['loss'])
         ctrial.append(history['constr'])
         wtrial.append(history['w'])
-        
+        nsamp.append(history['n_samples'])
 
         # Save the model
         model_path = os.path.join(directory, f'{ALG_NAME}_{LOSS_BOUND}_trial{EXP_IDX}_p{geomp}.pt')
         torch.save(net.state_dict(), model_path)
-        print('')
+        print(EXP_IDX + ' ')
    
    
     # Save DataFrames to CSV files
@@ -104,14 +106,16 @@ if __name__ == "__main__":
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
     index = pd.MultiIndex.from_product([['train', 'test'], np.arange(wlen), np.arange(EXP_NUM)], names=('is_train', 'iteration', 'trial'))
-    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2'])
+    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize'])
     full_stats.sort_index(inplace=True)
     
-    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).to(device)
     loss_fn = nn.BCEWithLogitsLoss()
     
-    X_test_tensor = tensor(X_test, dtype=torch.float)
-    y_test_tensor = tensor(y_test, dtype=torch.float)
+    X_test_tensor = tensor(X_test, dtype=torch.float).to(device)
+    y_test_tensor = tensor(y_test, dtype=torch.float).to(device)
     
     X_test_w = X_test_tensor[w_idx_test]
     y_test_w = y_test_tensor[w_idx_test]
@@ -123,26 +127,29 @@ if __name__ == "__main__":
     X_train_nw = X_train_tensor[nw_idx_train]
     y_train_nw = y_train_tensor[nw_idx_train]
     
+    save_train = False
+    
     with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
             for alg_iteration, w in enumerate(wtrial[exp_idx]):
+
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
                 
-                outs = net(X_train_tensor)
-                loss = loss_fn(outs, y_train_tensor.unsqueeze(1)).detach().numpy()
-                
-                c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().numpy()
-                c2 = -c1
-                # pandas multiindex bug(?) workaround
-                full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
-                
+                if save_train:
+                    outs = net(X_train_tensor)
+                    loss = loss_fn(outs, y_train_tensor.unsqueeze(1)).detach().cpu().numpy()
+                    
+                    c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().cpu().numpy()
+                    c2 = -c1
+                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': nsamp[exp_idx][alg_iteration]}
+                    
                 outs = net(X_test_tensor)
-                loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().numpy()
+                loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().cpu().numpy()
                 
-                c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().numpy()
+                c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': nsamp[exp_idx][alg_iteration]}
             
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_NAME}_{DATASET_NAME}_{LOSS_BOUND}_{geomp}_REPORT.csv'))

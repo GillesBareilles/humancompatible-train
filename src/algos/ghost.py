@@ -198,6 +198,7 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
     history = {'loss': [],
                'constr': [],
                'w': [], 
+               'n_samples': [],
                'fgrad_norm': [], 
                'cgrad_norm': [], 
                'loss_after': [], 
@@ -225,14 +226,19 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
             Nsamp = rng.geometric(p=geomp)
     
         mbatches = [1, 2**(Nsamp+1)]
+        history['n_samples'].append(3*(1 + 2 ** (Nsamp+1)))
         dsols = np.zeros((4, n))
         # for each subproblem:
         # same samples for each constraint? or no?
+        
+        ################
+        ### sampling ###
+        ################
         indices_f, indices_c_w, indices_c_b = [],[],[]
         for j, subp_batch_size in enumerate(mbatches):
             idx_f = rng.choice(len(data), size=subp_batch_size)
-            idx_c_w = rng.choice(len(data_w), size=subp_batch_size)
-            idx_c_b = rng.choice(len(data_b), size=subp_batch_size)
+            idx_c_w = rng.choice(len(data_w), size=max(subp_batch_size//2, 1))
+            idx_c_b = rng.choice(len(data_b), size=max(subp_batch_size//2, 1))
             if j == 1:
                 indices_f.append(idx_f[::2]) # even
                 indices_f.append(idx_f[1::2]) # odd
@@ -247,35 +253,34 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
                 indices_f.append(idx_f)
                 indices_c_w.append(idx_c_w)
                 indices_c_b.append(idx_c_b)
-        
+        ##############
+        ### update ###
+        ##############
         for j, samples in enumerate(zip(indices_f, indices_c_w, indices_c_b)):
-            idx = samples[0]
-            c1_sample = [samples[1], samples[2]]
-            c2_sample = [samples[1], samples[2]]
+            net.zero_grad()
             
+            idx = samples[0]
+            idx_w = samples[1]
+            idx_b = samples[2]
             obj_batch = data[idx]
+            c1_batch = [data_w[idx_w], data_b[idx_b]]
+            c2_batch = [data_w[idx_w], data_b[idx_b]]
             
             # calculate autograd jacobian of obj fun w.r.t. params
-            net.zero_grad()
             outs = net(obj_batch[0])
             feval = loss_fn(outs, obj_batch[1].unsqueeze(1))
     
             feval.backward()
             dfdw = net_grads_to_tensor(net, clip=False)
             
-            idx_w = rng.choice(len(data_w), size=subp_batch_size)
-            idx_b = rng.choice(len(data_b), size=subp_batch_size)
-            c1_sample = [data_w[idx_w], data_b[idx_b]]
-            c2_sample = [data_w[idx_w], data_b[idx_b]]
-            
             # calculate autograd jacobian of constraints fun w.r.t. params
             net.zero_grad()
-            c1_val = c1(net, c1_sample)
+            c1_val = c1(net, c1_batch)
             c1_val.backward()
             c1_grad = ar.to_numpy(net_grads_to_tensor(net, clip=False))
             
             net.zero_grad()
-            c2_val =  c2(net, c2_sample)
+            c2_val =  c2(net, c2_batch)
             c2_val.backward()
             c2_grad = ar.to_numpy(net_grads_to_tensor(net,clip=False))
             
@@ -294,11 +299,6 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
                                 qp_solver='osqp')
             
             dsols[j, :] = dsol
-    
-            history['loss'].append(feval)
-            history['constr'].append(constraint_eval)
-            history['fgrad_norm'].append(np.linalg.norm(dfdw))
-            history['cgrad_norm'].append(np.linalg.norm(dcdw))
         
         # aggregate solutions to the subproblem according to Eq. 23
         dsol = dsols[0, :] + (dsols[3, :]-0.5*dsols[1, :] -
@@ -314,5 +314,9 @@ def StochasticGhost_OddEven(net, data, w_ind, b_ind, geomp, loss_bound, maxiter,
                 start = end
                 
         history['w'].append(deepcopy(net.state_dict()))
+        
+        feval = loss_fn(outs, obj_batch[1].unsqueeze(1))
+        # history['loss'].append(feval)
+        # history['constr'].append(constraint_eval)
         
     return history
