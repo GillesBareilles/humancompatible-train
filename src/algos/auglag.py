@@ -41,7 +41,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
                 pmult_bound = 1e3,
                 start_lambda=None,
                 update_lambda=True,
-                update_pen = True):
+                update_pen = True,
+                device='cpu'):
         
     history = {'loss': [],
                'constr': [],
@@ -50,10 +51,10 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
     data_w = torch.utils.data.Subset(data, w_ind)
-    data_b = torch.utils.data.Subset(data, b_ind)    
-    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, )
-    loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True))
-    loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True))
+    data_b = torch.utils.data.Subset(data, b_ind)
+    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, generator=torch.Generator(device=device))
+    loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True, generator=torch.Generator(device=device)))
+    loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=torch.Generator(device=device)))
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(net.parameters())
@@ -61,9 +62,9 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     
     _lambda = torch.zeros(2) if start_lambda is None else start_lambda
     if update_pen:
-        c = torch.ones_like(_lambda)
+        c = 1.
     else:
-        c = torch.ones_like(_lambda) * 50
+        c = 50
     beta = 2.
     p = 2.
     
@@ -84,8 +85,10 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         if labels.dim() < outputs.dim():
             labels = labels.unsqueeze(1)
         loss_eval = loss_fn(outputs, labels)
-        constraint_eval = torch.tensor([c1(net, [w_sample, b_sample]), 
-                           c2(net, [w_sample, b_sample])])
+        constraint_eval = torch.tensor([
+            c1(net, [w_sample, b_sample]), 
+            c2(net, [w_sample, b_sample])
+        ])
         constraint_eval = torch.maximum(constraint_eval, torch.zeros(2))
         
         penalty_term = (1/p) * torch.sum(c * torch.abs(constraint_eval)**p)    # torch.norm(constraint_eval, p=_p)
@@ -95,106 +98,24 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         L.backward()
         optimizer.step()        
         
-        # print(f'{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval}|{c.detach().cpu().numpy()}', end='\r')
-        print(f'{iteration}', end='\r')        
+        print(f'{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval}|{c}', end='\r')
+        # print(f'{iteration}', end='\r')        
         # recalculate objective and constraint values based on updated network weights
         
         constraint_eval_updated = torch.tensor([c1(net, [w_sample, b_sample]), c2(net, [w_sample, b_sample])])
         constraint_eval_updated = torch.maximum(constraint_eval_updated, torch.zeros(2))
-        
+        # with torch.inference_mode():
         for i in range(len(constraint_eval_updated)):
             if iteration != 0 and constraint_eval_updated[i] > 0.5*constraint_eval[i]:
-                lambda_upd = _lambda[i] + c[i] * torch.abs(constraint_eval_updated[i])**(p-1)
+                lambda_upd = _lambda[i] + c * torch.abs(constraint_eval_updated[i])**(p-1)
                 if update_lambda and lambda_upd < lambda_bound:
                     _lambda[i] = lambda_upd
-                if c[i] < pmult_bound:
-                    c[i] *= 2
+            
+        if c < pmult_bound:
+            c *= 2    
                 
                 
         # old_constraint_eval = deepcopy(constraint_eval)
-        history['w'].append(deepcopy(net.state_dict()))
-        
-    return history
-    
-    
-    
-    
-def AugLagr_ind_sample_update(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, maxiter,
-                              max_runtime=np.inf,
-                              pmult_bound = 1e3,
-                              start_lambda=None,
-                              update_lambda=True):
-        
-    history = {'loss': [],
-               'constr': [],
-               'w': []}
-    
-    c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
-    c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
-    data_w = torch.utils.data.Subset(data, w_ind)
-    data_b = torch.utils.data.Subset(data, b_ind)    
-    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True)
-    loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True))
-    loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True))
-    
-    loss_fn = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(net.parameters())
-    n = sum(p.numel() for p in net.parameters())
-    
-    _lambda = torch.zeros(2) if start_lambda is None else start_lambda
-    c = torch.ones_like(_lambda)
-    beta = 2.
-    p = 2.
-    ###################
-    ###################
-    ###################
-    
-    run_start = timeit.default_timer()
-    for iteration, data in enumerate(loader):
-        net.zero_grad()
-        
-        current_time = timeit.default_timer()
-        if max_runtime > 0 and current_time - run_start >= max_runtime:
-            print(current_time - run_start)
-            return
-        
-        w_sample = next(loader_w)
-        b_sample = next(loader_b)
-        
-        inputs, labels = data
-        outputs = net(inputs)
-        if labels.dim() < outputs.dim():
-            labels = labels.unsqueeze(1)
-        loss_eval = loss_fn(outputs, labels)
-        constraint_eval = torch.tensor([c1(net, [w_sample, b_sample]), 
-                           c2(net, [w_sample, b_sample])])
-        constraint_eval = torch.maximum(constraint_eval, torch.zeros(2))
-        
-        penalty_term = (1/p) * torch.sum(c * torch.abs(constraint_eval)**p)    # torch.norm(constraint_eval, p=_p)
-        lag_term = _lambda @ constraint_eval
-        L = loss_eval + lag_term + penalty_term
-    
-        L.backward()
-        optimizer.step()        
-        
-        print(f'{iteration}|{loss_eval.detach().numpy()}|{_lambda.detach().numpy()}|{constraint_eval}|{c.detach().numpy()}', end='\r')
-        
-        # recalculate objective and constraint values based on updated network weights
-        
-        constraint_eval_updated = torch.tensor([c1(net, [w_sample, b_sample]), c2(net, [w_sample, b_sample])])
-        constraint_eval_updated = torch.maximum(constraint_eval_updated, torch.zeros(2))
-        
-        for i in range(len(constraint_eval_updated)):
-            if iteration != 0 and constraint_eval_updated[i] > 0.5*constraint_eval[i]:
-                lambda_upd = _lambda[i] + c[i] * torch.abs(constraint_eval[i])**(p-1)
-                if update_lambda and lambda_upd < lambda_bound:
-                    _lambda[i] = lambda_upd
-                
-                if c[i] < pmult_bound:
-                    c[i] *= 2
-                
-                
-        old_constraint_eval = deepcopy(constraint_eval)
         history['w'].append(deepcopy(net.state_dict()))
         
     return history

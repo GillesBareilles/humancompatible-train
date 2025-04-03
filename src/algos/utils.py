@@ -1,12 +1,17 @@
 import torch
 
 
-def net_params_to_tensor(net, flatten=False) -> torch.Tensor:
+def net_params_to_tensor(net: torch.nn.Module, flatten=False, copy=False) -> torch.Tensor:
     # flat_params = [ar.to_numpy(param) for param in net.parameters()]
-    params = [param for param in net.parameters()]
+    if copy:
+        params = [param.detach().clone() for param in net.parameters()]
+    else:
+        params = [param for param in net.parameters()]
+    
     if flatten:
-        flat_params = [torch.flatten(param) for param in net.parameters()]
+        flat_params = [torch.flatten(param) for param in params]
         return torch.concat(flat_params)
+    
     return params
         
 def net_grads_to_tensor(net, clip=False, flatten = True) -> torch.Tensor:

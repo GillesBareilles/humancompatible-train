@@ -42,6 +42,11 @@ def one_sided_loss_constr(loss, net, c_data):
 
 if __name__ == "__main__":
     
+    device = 'cpu'
+    if torch.cuda.is_available():
+        torch.set_default_device('cuda')
+        device = 'cuda'
+    
     DATASET_NAME = 'employment_az'
     FT_DATASET, FT_STATE = DATASET_NAME.split('_')
     
@@ -49,17 +54,17 @@ if __name__ == "__main__":
         FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False
     )
         
-    X_train_tensor = tensor(X_train, dtype=torch.float).cuda()
-    y_train_tensor = tensor(y_train, dtype=torch.float).cuda()
+    X_train_tensor = tensor(X_train, dtype=torch.float)
+    y_train_tensor = tensor(y_train, dtype=torch.float)
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
-    EXP_NUM = 30
+    EXP_NUM = 10
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
     ALG_TYPE = 'AUG' if UPDATE_LAMBDA else 'PEN'
-    BATCH_SIZE = 8
+    BATCH_SIZE = 16
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
@@ -71,14 +76,12 @@ if __name__ == "__main__":
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
         
-        torch.manual_seed(EXP_IDX)
-        
         net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
         history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=BATCH_SIZE, loss_bound=LOSS_BOUND, maxiter=np.inf,
-                          update_lambda=UPDATE_LAMBDA)
+                          update_lambda=UPDATE_LAMBDA,device=device)
         
         ## SAVE RESULTS ##
         ftrial.append(history['loss'])
@@ -134,8 +137,7 @@ if __name__ == "__main__":
                     
                     c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().cpu().numpy()
                     c2 = -c1
-                    # pandas multiindex bug(?) workaround
-                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE}
+                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE*3}
                     
                 outs = net(X_test_tensor)
                 loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().cpu().numpy()
@@ -143,7 +145,7 @@ if __name__ == "__main__":
                 c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE*3}
             
     
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

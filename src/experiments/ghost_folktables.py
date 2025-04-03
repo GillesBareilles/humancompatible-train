@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.ghost import StochasticGhost, StochasticGhost_OddEven
+from src.algos.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
@@ -54,12 +54,12 @@ if __name__ == "__main__":
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
-    EXP_NUM = 30
+    EXP_NUM = 10
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     ALG_NAME = 'sg_oe'
-    MAXITER = 1000
-    geomp = 0.1
+    MAXITER = 500
+    geomp = 0.05
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
@@ -76,12 +76,7 @@ if __name__ == "__main__":
         N = min(len(w_idx_train), len(nw_idx_train))
         
         random_seed = EXP_IDX*2
-                
-        if ALG_NAME == 'sg':
-            history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
-                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
-        elif ALG_NAME.startswith('sg_oe'):
-            history = StochasticGhost_OddEven(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
+        history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
                                   geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
             
         ## SAVE RESULTS ##
@@ -93,7 +88,7 @@ if __name__ == "__main__":
         # Save the model
         model_path = os.path.join(directory, f'{ALG_NAME}_{LOSS_BOUND}_trial{EXP_IDX}_p{geomp}.pt')
         torch.save(net.state_dict(), model_path)
-        print(EXP_IDX + ' ')
+        print(f'\n{EXP_IDX}\n')
    
    
     # Save DataFrames to CSV files
