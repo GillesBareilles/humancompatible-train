@@ -42,19 +42,23 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
                 start_lambda=None,
                 update_lambda=True,
                 update_pen = True,
-                device='cpu'):
+                device='cpu',
+                seed=42):
         
     history = {'loss': [],
                'constr': [],
-               'w': []}
+               'w': [],
+               'time': []}
     
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
     data_w = torch.utils.data.Subset(data, w_ind)
     data_b = torch.utils.data.Subset(data, b_ind)
-    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, generator=torch.Generator(device=device))
-    loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True, generator=torch.Generator(device=device)))
-    loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=torch.Generator(device=device)))
+    gen = torch.Generator(device=device)
+    gen.manual_seed(seed)
+    loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, generator=gen)
+    loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True, generator=gen))
+    loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=gen))
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(net.parameters())
@@ -73,6 +77,7 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         net.zero_grad()
         
         current_time = timeit.default_timer()
+        history['time'].append(current_time - run_start)
         if max_runtime > 0 and current_time - run_start >= max_runtime:
             print(current_time - run_start)
             return

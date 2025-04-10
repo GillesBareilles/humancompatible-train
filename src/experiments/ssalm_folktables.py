@@ -16,11 +16,11 @@ class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
         super().__init__()
         self.linear_relu_stack = nn.Sequential(
-            nn.Linear(in_shape, 64),
+            nn.Linear(in_shape, 64, dtype=torch.float16),
             nn.ReLU(),
-            nn.Linear(64, 32),
+            nn.Linear(64, 32, dtype=torch.float16),
             nn.ReLU(),
-            nn.Linear(32, out_shape),
+            nn.Linear(32, out_shape, dtype=torch.float16),
         )
 
     def forward(self, x):
@@ -49,13 +49,14 @@ if __name__ == "__main__":
     
     DATASET_NAME = 'employment_az'
     FT_DATASET, FT_STATE = DATASET_NAME.split('_')
+    torch.set_default_dtype(torch.float16)
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
         FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False
     )
         
-    X_train_tensor = tensor(X_train, dtype=torch.float)
-    y_train_tensor = tensor(y_train, dtype=torch.float)
+    X_train_tensor = tensor(X_train, dtype=torch.float16)
+    y_train_tensor = tensor(y_train, dtype=torch.float16)
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
@@ -63,35 +64,46 @@ if __name__ == "__main__":
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
-    ALG_TYPE = 'sslalm'
+    ALG_TYPE = 'sslalm_1'
+    read_model = False
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    ftrial, ctrial, wtrial = [], [], []
+    ftrial, ctrial, wtrial, ttrial = [], [], [], []
     
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
         
         torch.manual_seed(EXP_IDX)
+        model_path = os.path.join(directory, f'{ALG_TYPE}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
         
         net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).to(device)
+        if read_model:
+            net.load_state_dict(torch.load(model_path, weights_only=False, map_location=torch.device('cpu')))
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
         history = SSLALM(net, train_ds, w_idx_train, nw_idx_train, loss_bound=LOSS_BOUND,
-                          update_lambda=UPDATE_LAMBDA, device=device)
+                         lambda_bound = 100,
+                         rho = 1,
+                         mu = 2.,
+                         tau = 1e-3,
+                         beta = 0.1,
+                         eta = 5e-3,
+                         device=device,
+                         seed=EXP_IDX)
         
         ## SAVE RESULTS ##
-        ftrial.append(history['loss'])
-        ctrial.append(history['constr'])
+        # ftrial.append(history['loss'])
+        # ctrial.append(history['constr'])
         wtrial.append(history['w'])
+        ttrial.append(history['time'])
         
-
         # Save the model
-        model_path = os.path.join(directory, f'{ALG_TYPE}_{LOSS_BOUND}_trial{EXP_IDX}.pt')
+        
         torch.save(net.state_dict(), model_path)
         print('')
     
@@ -104,14 +116,14 @@ if __name__ == "__main__":
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
     index = pd.MultiIndex.from_product([['train', 'test'], np.arange(wlen), np.arange(EXP_NUM)], names=('is_train', 'iteration', 'trial'))
-    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize'])
+    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize', 'time'])
     full_stats.sort_index(inplace=True)
     
     net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
     loss_fn = nn.BCEWithLogitsLoss()
     
-    X_test_tensor = tensor(X_test, dtype=torch.float).cuda()
-    y_test_tensor = tensor(y_test, dtype=torch.float).cuda()
+    X_test_tensor = tensor(X_test, dtype=torch.float16).cuda()
+    y_test_tensor = tensor(y_test, dtype=torch.float16).cuda()
     
     X_test_w = X_test_tensor[w_idx_test]
     y_test_w = y_test_tensor[w_idx_test]
@@ -123,11 +135,12 @@ if __name__ == "__main__":
     X_train_nw = X_train_tensor[nw_idx_train]
     y_train_nw = y_train_tensor[nw_idx_train]
     
-    every_x_iter = 1
+    every_x_iter = 3
     save_train = False
     with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
-            for alg_iteration, w in enumerate(wtrial[exp_idx]):
+            weights_to_eval = wtrial[exp_idx][::every_x_iter]
+            for alg_iteration, w in enumerate(weights_to_eval):
 
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
@@ -147,7 +160,7 @@ if __name__ == "__main__":
                 c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': 1}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': 1, 'time': ttrial[exp_idx][alg_iteration]}
             
     
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

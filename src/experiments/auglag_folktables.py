@@ -59,34 +59,37 @@ if __name__ == "__main__":
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
-    EXP_NUM = 10
+    EXP_NUM = 5
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
-    ALG_TYPE = 'AUG' if UPDATE_LAMBDA else 'PEN'
-    BATCH_SIZE = 16
+    ALG_TYPE = 'AUG_test' if UPDATE_LAMBDA else 'PEN'
+    BATCH_SIZE = 8
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    ftrial, ctrial, wtrial = [], [], []
+    ftrial, ctrial, wtrial,ttrial = [], [], [], []
     
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
+        
+        torch.manual_seed(EXP_IDX)
         
         net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
         history = AugLagr(net, train_ds, w_idx_train, nw_idx_train, batch_size=BATCH_SIZE, loss_bound=LOSS_BOUND, maxiter=np.inf,
-                          update_lambda=UPDATE_LAMBDA,device=device)
+                          update_lambda=UPDATE_LAMBDA,device=device, seed=EXP_IDX)
         
         ## SAVE RESULTS ##
         ftrial.append(history['loss'])
         ctrial.append(history['constr'])
         wtrial.append(history['w'])
+        ttrial.append(history['time'])
         
 
         # Save the model
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
     index = pd.MultiIndex.from_product([['train', 'test'], np.arange(wlen), np.arange(EXP_NUM)], names=('is_train', 'iteration', 'trial'))
-    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize'])
+    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize', 'time'])
     full_stats.sort_index(inplace=True)
     
     net = SimpleNet(in_shape=X_test.shape[1], out_shape=1).cuda()
@@ -126,7 +129,7 @@ if __name__ == "__main__":
     save_train = False
     with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
-            for alg_iteration, w in enumerate(wtrial[exp_idx]):
+            for alg_iteration, w in enumerate(wtrial[exp_idx][::every_x_iter]):
 
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
@@ -145,7 +148,11 @@ if __name__ == "__main__":
                 c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE*3}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss,
+                                                                     'C1': c1,
+                                                                     'C2': c2,
+                                                                     'SampleSize': BATCH_SIZE*3,
+                                                                     'time': ttrial[exp_idx][alg_iteration]}
             
     
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{1}_REPORT.csv'))

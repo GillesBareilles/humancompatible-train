@@ -26,6 +26,22 @@ class SimpleNet(nn.Module):
     def forward(self, x):
         logits = self.linear_relu_stack(x)
         return logits
+    
+    
+class SimpleNet_diff(nn.Module):
+    def __init__(self, in_shape, out_shape):
+        super().__init__()
+        self.linear_relu_stack = nn.Sequential(
+            nn.Linear(in_shape, 64),
+            nn.GELU(),
+            nn.Linear(64, 32),
+            nn.GELU(),
+            nn.Linear(32, out_shape),
+        )
+
+    def forward(self, x):
+        logits = self.linear_relu_stack(x)
+        return logits
 
 def one_sided_loss_constr(loss, net, c_data):
     w_inputs, w_labels = c_data[0]
@@ -54,28 +70,28 @@ if __name__ == "__main__":
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
     
     # TODO: move to command line args
-    EXP_NUM = 10
+    EXP_NUM = 3
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
-    ALG_NAME = 'sg_oe'
-    MAXITER = 500
-    geomp = 0.05
+    ALG_NAME = 'sg_diffle_ss'
+    MAXITER = 1000
+    geomp = 0.1
     
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
     directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    ftrial, ctrial, wtrial, nsamp = [], [], [], []
+    ftrial, ctrial, wtrial, nsamp, ttrial = [], [], [], [], []
     
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
         
-        net = SimpleNet(in_shape=X_test.shape[1], out_shape=1)
+        net = SimpleNet_diff(in_shape=X_test.shape[1], out_shape=1)
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        random_seed = EXP_IDX*2
+        random_seed = EXP_IDX
         history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
                                   geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
             
@@ -83,6 +99,7 @@ if __name__ == "__main__":
         ftrial.append(history['loss'])
         ctrial.append(history['constr'])
         wtrial.append(history['w'])
+        ttrial.append(history['time'])
         nsamp.append(history['n_samples'])
 
         # Save the model
@@ -101,7 +118,7 @@ if __name__ == "__main__":
     # df(n_iter, n_trials)
     wlen = max([len(tr) for tr in wtrial])
     index = pd.MultiIndex.from_product([['train', 'test'], np.arange(wlen), np.arange(EXP_NUM)], names=('is_train', 'iteration', 'trial'))
-    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize'])
+    full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize', 'time'])
     full_stats.sort_index(inplace=True)
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -145,6 +162,10 @@ if __name__ == "__main__":
                 c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': nsamp[exp_idx][alg_iteration]}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss,
+                                                                     'C1': c1,
+                                                                     'C2': c2,
+                                                                     'SampleSize': nsamp[exp_idx][alg_iteration],
+                                                                     'time': ttrial[exp_idx][alg_iteration]}
             
     full_stats.to_csv(os.path.join(utils_path, f'{ALG_NAME}_{DATASET_NAME}_{LOSS_BOUND}_{geomp}_REPORT.csv'))
