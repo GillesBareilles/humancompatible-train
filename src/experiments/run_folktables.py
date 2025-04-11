@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.sslalm import SSLPD
+from src.algos.sslpd import SSLPD
 from src.algos.sw_sub import SwitchingSubgradient
 from src.algos.auglag import AugLagr
 from src.algos.ghost import StochasticGhost
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     print(f'Train data loaded: {DATASET_NAME}')
     
     # TODO: move to command line args
-    EXP_NUM = 5
+    EXP_NUM = 1
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True

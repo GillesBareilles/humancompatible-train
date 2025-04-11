@@ -69,7 +69,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     c1 = lambda net, d, s: one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
     c2 = lambda net, d, s: -one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
     
-    # c = [c1, c2]
+    c = [c1, c2]
     
     data_w = torch.utils.data.Subset(data, w_ind)
     data_b = torch.utils.data.Subset(data, b_ind)
@@ -77,7 +77,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     loss_fn = torch.nn.BCEWithLogitsLoss()
     n = sum(p.numel() for p in net.parameters())
     
-    _lambda = torch.zeros(2,requires_grad=True) if start_lambda is None else start_lambda
+    _lambda = torch.zeros(len(c),requires_grad=True) if start_lambda is None else start_lambda
     z = torch.concat([
             net_params_to_tensor(net, flatten=True, copy=True),
             slack_vars
@@ -92,7 +92,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
         loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True, generator=gen))
         loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=gen))
         
-        for iteration, f_sample in enumerate(loader):
+        for iteration, (f_inputs, f_labels) in enumerate(loader):
             
             if max_iter is not None and iteration == max_iter:
                 return history
@@ -106,18 +106,19 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             ########################
             
             net.zero_grad()
+            slack_vars.grad = None
             
-            # sample for constraints
-            with torch.no_grad():
-                cw_sample = next(loader_w)
-                cb_sample = next(loader_b)
-                c_sample = [cw_sample, cb_sample]
-                c_t = torch.tensor([
-                    c1(net, c_sample, slack_vars[0]),
-                    c2(net, c_sample, slack_vars[1])
-                ])
-                _lambda += eta * c_t
+            # sample for constraints (line 2)
+            cw_sample = next(loader_w)
+            cb_sample = next(loader_b)
+            c_sample = [cw_sample, cb_sample]
+            # calc constraints and update multipliers (line 3)
+            c_1 = torch.concat([
+                ci(net, c_sample, slack_vars[i]).reshape(1) for i, ci in enumerate(c)
+            ])
+            _lambda += eta * c_1
             
+            # dual safeguard (lines 4,5)
             if torch.norm(_lambda) >= lambda_bound:
                 _lambda = torch.zeros_like(_lambda, requires_grad=True)
             
@@ -125,98 +126,107 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             ## UPDATE PARAMETERS ##
             #######################
             
-            net.zero_grad()
-            slack_vars.grad = None
-            # loss
-            f_inputs, f_labels = f_sample
             outputs = net(f_inputs)       
             if f_labels.dim() < outputs.dim():
                 f_labels = f_labels.unsqueeze(1)
             loss_eval = loss_fn(outputs, f_labels)
-            
-            # loss grad
-            loss_eval.backward()
+            loss_eval.backward() # loss grad
             f_grad = net_grads_to_tensor(net)
-            f_grad = torch.concat([f_grad, torch.zeros(2)]) # add zeros for slack vars
+            f_grad = torch.concat([f_grad, torch.zeros(len(c))]) # add zeros for slack vars
             net.zero_grad()
             
-            # constraints
-            _c1 = c1(net, c_sample, slack_vars[0]).reshape(1)
-            _c2 = c2(net, c_sample, slack_vars[1]).reshape(1)
-            constraint_eval = torch.concat([_c1,_c2])
-            # constraint grads
-            _c1.backward()
-            c1_grad = net_grads_to_tensor(net)
-            c1_grad = torch.concat([c1_grad, slack_vars.grad])
-            net.zero_grad()
-            slack_vars.grad = None
+            # constraint grad estimate
+            c_grad = []
+            for ci in c_1:
+                ci.backward()
+                ci_grad = net_grads_to_tensor(net)
+                c_grad.append(torch.concat([ci_grad, slack_vars.grad]))
+                net.zero_grad()
+                slack_vars.grad = None
+            c_grad = torch.stack(c_grad)
             
-            _c2.backward()
-            c2_grad = net_grads_to_tensor(net)
-            c2_grad = torch.concat([c2_grad, slack_vars.grad])
-            net.zero_grad()
-            slack_vars.grad = None
-            
-            c_grad = torch.stack([c1_grad, c2_grad])
-            
-            # second sample to make estimator unbiased
+            # independent constraint estimate
+            cw_sample = next(loader_w)
+            cb_sample = next(loader_b)
+            c_sample = [cw_sample, cb_sample]
             with torch.no_grad():
-                cw_sample = next(loader_w)
-                cb_sample = next(loader_b)
-                c_sample = [cw_sample, cb_sample]
-                _c1_ = c1(net, c_sample, slack_vars[0]).reshape(1)
-                _c2_ = c2(net, c_sample, slack_vars[1]).reshape(1)
-                _c_ = torch.tensor([_c1_, _c2_])
+                c_2 = torch.concat([ci(net, c_sample, slack_vars[i]).reshape(1) for i, ci in enumerate(c)])
             
             x_t = torch.concat([
                 net_params_to_tensor(net, flatten=True, copy=True),
                 slack_vars
             ])
             
-            G = f_grad + c_grad.T @ _lambda + rho*(c_grad.T @ _c_) + mu*(x_t - z)
+            G = f_grad + c_grad.T @ _lambda + rho*(c_grad.T @ c_2) + mu*(x_t - z)
 
             x_t1 = project(x_t - tau*G, 2)
             z += beta*(x_t-z)
             
-            start = 0
             with torch.no_grad():
-                w = net_params_to_tensor(net, flatten=False, copy=False)
-                for i in range(len(w)):
-                    end = start + w[i].numel()
-                    w[i].set_(x_t1[start:end].reshape(w[i].shape))
-                    start = end
-
+                _set_weights(net, x_t1)
                 for i in range(len(slack_vars)):
                     slack_vars[i] = x_t1[i-len(slack_vars)]
                     
-            print(f"""{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval.detach().cpu().numpy()}|{slack_vars.detach().cpu().numpy()}""", end='\r')
+            print(f"""{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{c_1.detach().cpu().numpy()}|{slack_vars.detach().cpu().numpy()}""", end='\r')
             history['w'].append(deepcopy(net.state_dict()))
         
     ######################
     ### POSTPROCESSING ###    
     ######################
     
-    f_sample = None
-    c_sample1 = None
-    c_sample2 = None
+    G_hat = torch.zeros(1)
+    
+    for iteration, (f_inputs, f_labels) in enumerate(loader):
+        cgrad_sample = [next(loader_w), next(loader_b)]
+        c_sample = [next(loader_w), next(loader_b)]
 
-    net.zero_grad()
-    slack_vars.grad = None
-    # loss
-    f_inputs, f_labels = f_sample
-    outputs = net(f_inputs)       
-    if f_labels.dim() < outputs.dim():
-        f_labels = f_labels.unsqueeze(1)
-    loss_eval = loss_fn(outputs, f_labels)
-    # loss grad
-    loss_eval.backward()
-    f_grad = net_grads_to_tensor(net)
-    f_grad = torch.concat([f_grad, torch.zeros(2)]) # add zeros for slack vars
-    net.zero_grad()
+        net.zero_grad()
+        slack_vars.grad = None
+        # loss
+        outputs = net(f_inputs)       
+        if f_labels.dim() < outputs.dim():
+            f_labels = f_labels.unsqueeze(1)
+        loss_eval = loss_fn(outputs, f_labels)
+        # loss grad
+        loss_eval.backward()
+        f_grad = net_grads_to_tensor(net)
+        f_grad = torch.concat([f_grad, torch.zeros(2)]) # add zeros for slack vars
+        net.zero_grad()
+        # constraint grad estimate
+        c_1 = torch.concat([
+            ci(net, c_sample, slack_vars[i]).reshape(1) for i, ci in enumerate(c)
+        ])
+        c_grad = []
+        for ci in c_1:
+            ci.backward()
+            ci_grad = net_grads_to_tensor(net)
+            c_grad.append(torch.concat([ci_grad, slack_vars.grad]))
+            net.zero_grad()
+            slack_vars.grad = None
+        c_grad = torch.stack(c_grad)
+        
+        # independent constraint estimate
+        with torch.no_grad():
+            c_2 = torch.concat([
+                ci(net, cgrad_sample, slack_vars[i]).reshape(1) for i, ci in enumerate(c)
+            ])
+        x_t = torch.concat([
+            net_params_to_tensor(net, flatten=True, copy=True),
+            slack_vars
+        ])
+        G_hat += f_grad + c_grad.T @ _lambda + rho*(c_grad.T @ c_2) + mu*(x_t - z)
+        
+    x_t1 = project(x_t - tau*G_hat, 2)
     
-    
-    
-    
-    G_hat = 
+    _set_weights(net, x_t1)
+    history['w'].append(deepcopy(net.state_dict()))
     
     return history
+
+
+def _set_weights(net: torch.nn.Module, x):
+    w = net_params_to_tensor(net, flatten=False, copy=False)
+    for i in range(len(w)):
+        end = start + w[i].numel()
+        w[i].set_(x[start:end].reshape(w[i].shape))
+        start = end

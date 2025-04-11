@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.sslalm import SSLPD
+from src.algos.sslpd import SSLPD
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
