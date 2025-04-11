@@ -93,7 +93,7 @@ if __name__ == "__main__":
         
         random_seed = EXP_IDX
         history = StochasticGhost(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train,
-                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,random_state=random_seed)
+                                  geomp=geomp, loss_bound=LOSS_BOUND, maxiter=MAXITER,seed=random_seed)
             
         ## SAVE RESULTS ##
         ftrial.append(history['loss'])

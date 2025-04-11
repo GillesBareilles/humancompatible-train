@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
-from src.algos.sslalm import SSLALM
+from src.algos.sslalm import SSLPD
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape):
@@ -86,7 +86,7 @@ if __name__ == "__main__":
         
         N = min(len(w_idx_train), len(nw_idx_train))
         
-        history = SSLALM(net, train_ds, w_idx_train, nw_idx_train, loss_bound=LOSS_BOUND,
+        history = SSLPD(net, train_ds, w_idx_train, nw_idx_train, loss_bound=LOSS_BOUND,
                          lambda_bound = 100,
                          rho = 1,
                          mu = 2.,
@@ -94,7 +94,8 @@ if __name__ == "__main__":
                          beta = 0.1,
                          eta = 5e-3,
                          device=device,
-                         seed=EXP_IDX)
+                         seed=EXP_IDX,
+                         max_iter=40000)
         
         ## SAVE RESULTS ##
         # ftrial.append(history['loss'])

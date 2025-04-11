@@ -98,7 +98,7 @@ def one_sided_loss_constr(loss, net, c_data):
 
 
 def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
-                    zeta=1e-3, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.,random_state=42):
+                    zeta=1e-3, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.,seed=42):
     
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -123,7 +123,7 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
     
     n = sum(p.numel() for p in net.parameters())
     
-    rng = np.random.default_rng(seed=random_state)
+    rng = np.random.default_rng(seed=seed)
     
     run_start = timeit.default_timer()
     

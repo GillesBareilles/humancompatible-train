@@ -43,7 +43,7 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
                 update_lambda=True,
                 update_pen = True,
                 device='cpu',
-                seed=42):
+                seed=None):
         
     history = {'loss': [],
                'constr': [],
@@ -55,7 +55,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     data_w = torch.utils.data.Subset(data, w_ind)
     data_b = torch.utils.data.Subset(data, b_ind)
     gen = torch.Generator(device=device)
-    gen.manual_seed(seed)
+    if seed is not None:
+        gen.manual_seed(seed)
     loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, generator=gen)
     loader_w = cycle(torch.utils.data.DataLoader(data_w, batch_size, shuffle=True, generator=gen))
     loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=gen))
@@ -103,7 +104,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         L.backward()
         optimizer.step()        
         
-        print(f'{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval}|{c}', end='\r')
+        with np.printoptions(precision=6, suppress=True):
+            print(f'{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{constraint_eval}|{c}', end='\r')
         # print(f'{iteration}', end='\r')        
         # recalculate objective and constraint values based on updated network weights
         
