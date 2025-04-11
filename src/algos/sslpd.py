@@ -217,6 +217,6 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     
     
     
-    G_hat = 
+    # G_hat = 
     
     return history
