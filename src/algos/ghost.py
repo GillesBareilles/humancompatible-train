@@ -1,4 +1,5 @@
 from typing import Tuple,Callable, List
+import pandas as pd
 import torch.utils.data.dataloader
 import numpy as np
 import scipy as sp
@@ -98,7 +99,7 @@ def one_sided_loss_constr(loss, net, c_data):
 
 
 def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
-                    zeta=1e-3, gamma0 = 0.1, rho=1e-3, lamb=0.5, beta=10., tau=2.,seed=42):
+                    stepsize_rule = 'inv_iter', zeta=0.5, gamma0 = 0.1, rho=0.8, lamb=0.5, beta=10., tau=1.,seed=42):
     
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -134,13 +135,17 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         
         if max_runtime > 0 and current_time - run_start >= max_runtime:
             print(current_time - run_start)
-            return
+            history['constr'] = pd.DataFrame(history['constr'])
+            return history
     
-        # gamma = gamma0/(iteration+1)**zeta
-        if iteration == 0:
-            gamma = gamma0
-        else:
-            gamma *= (1-zeta*gamma)
+        # gamma = 
+        if stepsize_rule == 'inv_iter':
+            gamma = gamma0/(iteration+1)**zeta
+        elif stepsize_rule == 'dimin':
+            if iteration == 0:
+                gamma = gamma0
+            else:
+                gamma *= (1-zeta*gamma)
         # gamma = 1.5e-2
         
         Nsamp = rng.geometric(p=geomp) - 1
@@ -207,9 +212,11 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
             constraint_eval = np.array([c1_val.detach(), c2_val.detach()])
             dcdw = np.array([c1_grad, c2_grad])
             
+            history['constr'].append(np.array([c1_val.detach().numpy(), c2_val.detach().numpy()]))
+            
             # kappa = compute_kappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
-            kappa = computekappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw), scalef=1)
-            # kappa = __computekappa__(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
+            # kappa = computekappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw), scalef=1)
+            kappa = __computekappa__(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
             
             # solve subproblem
             feval = ar.to_numpy(feval)
@@ -238,5 +245,6 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         history['w'].append(deepcopy(net.state_dict()))
         
         feval = loss_fn(outs, obj_batch[1].unsqueeze(1))
-        
+    
+    history['constr'] = pd.DataFrame(history['constr'])
     return history

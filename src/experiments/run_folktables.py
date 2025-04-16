@@ -11,7 +11,7 @@ parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
 from src.algos.sslpd import SSLPD
-from src.algos.sw_sub import SwitchingSubgradient
+from src.algos.sw_sub import SwitchingSubgradient_unbiased
 from src.algos.auglag import AugLagr
 from src.algos.ghost import StochasticGhost
 
@@ -60,6 +60,9 @@ if __name__ == "__main__":
     else:
         device = 'cpu'
         print('CUDA not found')
+    device = 'cpu'
+    
+    print(f'{device = }')    
     torch.set_default_device(device)
     
     DTYPE = torch.float32
@@ -78,14 +81,14 @@ if __name__ == "__main__":
     print(f'Train data loaded: {DATASET_NAME}')
     
     # TODO: move to command line args
-    EXP_NUM = 5
+    EXP_NUM = 7
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
-    G_ALPHA = 0.1
-    ALG_TYPE = 'sslalm'
+    G_ALPHA = 0.5
+    ALG_TYPE = 'sg'
     BATCH_SIZE = 16
-    MAXITER_GHOST = 1000
+    MAXITER_GHOST = 1500
     MAXITER_ALM = np.inf
     MAXITER_SSG = np.inf
     MAXITER_SSLALM = np.inf
@@ -104,7 +107,7 @@ if __name__ == "__main__":
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    ftrial, ctrial, wtrial, ttrial = [], [], [], []
+    ftrial, ctrial, wtrial, ttrial, samples_trial = [], [], [], [], []
     
     # experiment loop
     for EXP_IDX in range(EXP_NUM):
@@ -120,17 +123,26 @@ if __name__ == "__main__":
         
         
         if ALG_TYPE.startswith('swsg'):
-            history = SwitchingSubgradient(net, train_ds, w_idx_train, nw_idx_train,
+            history = SwitchingSubgradient_unbiased(net, train_ds, w_idx_train, nw_idx_train,
                                                    loss_bound=LOSS_BOUND,
                                                    batch_size=BATCH_SIZE,
-                                                   epochs=1,
-                                                   stepsize_rule='const',
-                                                   stepsize=5e-3,
+                                                   epochs=2,
+                                                   ctol = LOSS_BOUND,
+                                                   f_stepsize_rule='dimin',
+                                                   f_stepsize=7e-1,
+                                                   c_stepsize_rule='dimin',
+                                                   c_stepsize=7e-1,
                                                    device=device,
                                                    seed=EXP_IDX)
         elif ALG_TYPE.startswith('sg'):
             history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
                                   geomp=G_ALPHA,
+                                  stepsize_rule='inv_iter',
+                                  zeta = 0.3,
+                                  gamma0 = 0.05,
+                                  beta=10.,
+                                  rho=0.8,
+                                  lamb = 0.75,
                                   loss_bound=LOSS_BOUND,
                                   maxiter=MAXITER_GHOST,
                                   seed=EXP_IDX)
@@ -156,10 +168,11 @@ if __name__ == "__main__":
                          device=device,
                          seed=EXP_IDX)
         ## SAVE RESULTS ##
-        # ftrial.append(history['loss'])
-        # ctrial.append(history['constr'])
+        ftrial.append(pd.Series(history['loss']))
+        ctrial.append(history['constr'])
         wtrial.append(history['w'])
         ttrial.append(history['time'])
+        samples_trial.append(pd.Series(history['n_samples']))
         
         # Save the model
         
@@ -170,6 +183,19 @@ if __name__ == "__main__":
     utils_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'exp_results'))
     if not os.path.exists(utils_path):
         os.makedirs(utils_path)
+    
+    ftrial = pd.concat(ftrial, keys=range(len(ftrial)))
+    ctrial = pd.concat(ctrial, keys=range(len(ctrial)))
+    samples_trial = pd.concat(samples_trial, keys=range(len(ctrial)))
+    
+    if ALG_TYPE.startswith('sg'):
+        fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{G_ALPHA}'
+    else:
+        fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}'
+    print(f'Saving to: {fname}')
+    ftrial.to_csv(os.path.join(utils_path, fname + '_ftrial.csv'))
+    ctrial.to_csv(os.path.join(utils_path, fname + '_ctrial.csv'))
+    samples_trial.to_csv(os.path.join(utils_path, fname + '_samples.csv'))
     
     print('----')
     # df(n_iter, n_trials)
@@ -218,7 +244,12 @@ if __name__ == "__main__":
                 c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
-                full_stats.loc['test'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': BATCH_SIZE, 'time': ttrial[exp_idx][alg_iteration]}
+                full_stats.loc['test'].at[alg_iteration, exp_idx] = {
+                    'Loss': loss,
+                    'C1': c1,
+                    'C2': c2,
+                    'SampleSize': samples_trial[exp_idx][alg_iteration],
+                    'time': ttrial[exp_idx][alg_iteration]}
             
     if ALG_TYPE.startswith('sg'):
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{G_ALPHA}.csv'
