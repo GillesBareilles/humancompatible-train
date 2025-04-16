@@ -94,7 +94,7 @@ if __name__ == "__main__":
         net = SimpleNet_diff(in_shape=X_test.shape[1], out_shape=1)
         
         random_seed = EXP_IDX
-        history = SwitchingSubgradient(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train, loss_bound=LOSS_BOUND,
+        history = SwitchingSubgradient_unbiased(net, train_ds, w_ind=w_idx_train, b_ind = nw_idx_train, loss_bound=LOSS_BOUND,
                                        device=device, batch_size=8, epochs=1, stepsize_rule='dimin')
             
         ## SAVE RESULTS ##
