@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import pandas as pd
@@ -54,6 +55,41 @@ def roc_constraint(loss, net, c_data):
 
 if __name__ == "__main__":
     
+    parser = argparse.ArgumentParser(
+                    prog='folktables exp')
+    
+    ### experiment parameters
+    parser.add_argument('-alg', '--algorithm')
+    parser.add_argument('-ne', '--num_exp', type=int)
+    
+    ### algorithm parameters
+    parser.add_argument('-maxiter', '--maxiter', nargs='?', const=None, type=int)
+    # ghost
+    parser.add_argument('-alpha', '--geomp', nargs='?', const=0.2, default=0.2, type=float)
+    parser.add_argument('-beta', '--beta', nargs='?', const=10, default=10, type=float)
+    parser.add_argument('-rho', '--rho', nargs='?', const=0.8, default=0.8, type=float)
+    parser.add_argument('-lambda', '--lam', nargs='?', const=0.5, default=0.5, type=float)
+    parser.add_argument('-gamma0', '--gamma0', nargs='?', const=0.05, default=0.05, type=float)
+    parser.add_argument('-zeta', '--zeta', nargs='?', const=0.3, default=0.3, type=float)
+    parser.add_argument('-tau', '--tau', nargs='?', const=1, default=1, type=float)
+    # parser.add_argument('-kappa_mode', '--kappa_mode', nargs='?', const='old')
+    
+    # parse args
+    args = parser.parse_args()
+    ALG_TYPE = args.algorithm
+    EXP_NUM = args.num_exp
+    
+    if ALG_TYPE == 'sg':
+        G_ALPHA = args.geomp
+        MAXITER_GHOST = 1000 if args.maxiter is None else args.maxiter
+        ghost_rho = args.rho
+        ghost_beta = args.beta
+        ghost_lambda = args.lam
+        ghost_gamma0 = args.gamma0
+        ghost_zeta = args.zeta
+        ghost_tau = args.tau
+    
+    
     if torch.cuda.is_available():
         device = 'cuda'
         print('CUDA found')
@@ -81,14 +117,14 @@ if __name__ == "__main__":
     print(f'Train data loaded: {DATASET_NAME}')
     
     # TODO: move to command line args
-    EXP_NUM = 7
+    # EXP_NUM = 7
     LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
-    G_ALPHA = 0.5
-    ALG_TYPE = 'sg'
+    # G_ALPHA = 0.3
+    # ALG_TYPE = 'sg'
     BATCH_SIZE = 16
-    MAXITER_GHOST = 1500
+    # MAXITER_GHOST = 1500
     MAXITER_ALM = np.inf
     MAXITER_SSG = np.inf
     MAXITER_SSLALM = np.inf
@@ -138,11 +174,12 @@ if __name__ == "__main__":
             history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
                                   geomp=G_ALPHA,
                                   stepsize_rule='inv_iter',
-                                  zeta = 0.3,
-                                  gamma0 = 0.05,
-                                  beta=10.,
-                                  rho=0.8,
-                                  lamb = 0.75,
+                                  zeta = ghost_zeta,
+                                  gamma0 = ghost_gamma0,
+                                  beta=ghost_beta,
+                                  rho=ghost_rho,
+                                  lamb = ghost_lambda,
+                                  tau = ghost_tau,
                                   loss_bound=LOSS_BOUND,
                                   maxiter=MAXITER_GHOST,
                                   seed=EXP_IDX)

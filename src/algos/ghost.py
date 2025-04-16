@@ -25,6 +25,7 @@ def computekappa(cval, cgrad, lamb, rho, mc, n, scalef):
     except:
        return (1-lamb)*max_c_viol + lamb*max(0, rho)
    
+   
 def __computekappa__(cval, cgrad, lamb, rho, mc, n,):  
     # Objective: minimize t (first variable) with [t; d] as variables
     obj = np.concatenate(([1.], np.zeros(n)))
@@ -63,6 +64,21 @@ def compute_kappa(cval, cgrad, lamb, rho,mc ,n):
         term2 = lamb * rho
 
     return term1 + term2
+
+
+def compute_kappa_cvxpy(cval, cgrad, lamb, rho,mc ,n):
+    first_term = np.maximum(cval, 0).max()
+
+    # Second term: λ * min_d { max_i [ (C_i + ∇C_i^T d)_+ ], ||d||_inf <= ρ }
+    d = cp.Variable(n)
+    constraints = [cp.norm_inf(d) <= rho]
+    obj_terms = [cp.pos(cval[i] + cgrad[i] @ d) for i in range(mc)]
+    problem = cp.Problem(cp.Minimize(cp.maximum(*obj_terms)), constraints)
+    second_term = problem.solve(solver='PDLP')
+
+    # Combine terms
+    kappa = (1 - lamb) * first_term + lamb * second_term
+    return kappa
 
 def solvesubp(fgrad, cval, cgrad, kap_val, beta, tau, hesstype, mc, n, qp_solver='osqp', solver_params={}):
     if hesstype == 'diag':
@@ -150,7 +166,7 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         
         Nsamp = rng.geometric(p=geomp) - 1
         while (2**(Nsamp+1)) > max_sample_size:
-            Nsamp = rng.geometric(p=geomp)
+            Nsamp = rng.geometric(p=geomp) - 1
     
         mbatches = [1, 2**(Nsamp+1)]
         history['n_samples'].append(3*(1 + 2 ** (Nsamp+1)))
@@ -214,9 +230,10 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
             
             history['constr'].append(np.array([c1_val.detach().numpy(), c2_val.detach().numpy()]))
             
-            # kappa = compute_kappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
+            # kappa = compute_kappa_cvxpy(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
+            kappa = compute_kappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
             # kappa = computekappa(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw), scalef=1)
-            kappa = __computekappa__(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
+            # kappa = __computekappa__(constraint_eval, dcdw, rho, lamb, mc=2, n=len(dfdw))
             
             # solve subproblem
             feval = ar.to_numpy(feval)
@@ -237,6 +254,9 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         print(f'{iteration}', end='\r')
         with torch.no_grad():
             w = net_params_to_tensor(net)
+            if any([torch.any(torch.isnan(lw)) for lw in w]):
+                print('NaNs!')
+                return history
             for i in range(len(w)):
                 end = start + w[i].numel()
                 w[i].add_(torch.tensor(gamma*np.reshape(dsol[start:end], np.shape(w[i]))))
