@@ -178,8 +178,8 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         indices_f, indices_c_w, indices_c_b = [],[],[]
         for j, subp_batch_size in enumerate(mbatches):
             idx_f = rng.choice(len(data), size=subp_batch_size)
-            idx_c_w = rng.choice(len(data_w), size=max(subp_batch_size, 1))
-            idx_c_b = rng.choice(len(data_b), size=max(subp_batch_size, 1))
+            idx_c_w = rng.choice(len(data_w), size=max(subp_batch_size//2, 1))
+            idx_c_b = rng.choice(len(data_b), size=max(subp_batch_size//2, 1))
             if j == 1:
                 indices_f.append(idx_f[::2]) # even
                 indices_f.append(idx_f[1::2]) # odd

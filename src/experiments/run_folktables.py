@@ -30,6 +30,21 @@ class SimpleNet(nn.Module):
     def forward(self, x):
         logits = self.linear_relu_stack(x)
         return logits
+    
+class SimpleDiffNet(nn.Module):
+    def __init__(self, in_shape, out_shape, dtype):
+        super().__init__()
+        self.linear_gelu_stack = nn.Sequential(
+            nn.Linear(in_shape, 64, dtype=dtype),
+            nn.GELU(),
+            nn.Linear(64, 32, dtype=dtype),
+            nn.GELU(),
+            nn.Linear(32, out_shape, dtype=dtype),
+        )
+
+    def forward(self, x):
+        logits = self.linear_gelu_stack(x)
+        return logits
 
 def one_sided_loss_constr(loss, net, c_data):
     w_inputs, w_labels = c_data[0]
@@ -72,7 +87,17 @@ if __name__ == "__main__":
     parser.add_argument('-gamma0', '--gamma0', nargs='?', const=0.05, default=0.05, type=float)
     parser.add_argument('-zeta', '--zeta', nargs='?', const=0.3, default=0.3, type=float)
     parser.add_argument('-tau', '--tau', nargs='?', const=1, default=1, type=float)
-    # parser.add_argument('-kappa_mode', '--kappa_mode', nargs='?', const='old')
+    
+    # ssg
+    parser.add_argument('-frule', '--frule', nargs='?', const='dimin', default='dimin', type=str)
+    parser.add_argument('-fs', '--f_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
+    parser.add_argument('-crule', '--crule', nargs='?', const='dimin', default='dimin', type=str)
+    parser.add_argument('-cs', '--c_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
+    parser.add_argument('-e', '--epochs', nargs='?', const=1, default=1, type=int)
+    parser.add_argument('-ctol', '--ctol', nargs='?', const=1e-3, default=1e-3, type=float)
+    
+    # alm
+    parser.add_argument('-bs', '--batch_size', nargs='?', const=8, default=8, type=int)
     
     # parse args
     args = parser.parse_args()
@@ -88,15 +113,27 @@ if __name__ == "__main__":
         ghost_gamma0 = args.gamma0
         ghost_zeta = args.zeta
         ghost_tau = args.tau
+    elif ALG_TYPE == 'swsg':
+        epochs=args.epochs
+        ctol = args.ctol
+        f_stepsize_rule=args.frule
+        f_stepsize=args.f_stepsize
+        c_stepsize_rule=args.crule
+        c_stepsize=args.c_stepsize
+    elif ALG_TYPE == 'aug':
+        epochs=args.epochs
+        batch_size = args.batch_size
+        MAXITER_ALM = 1000 if args.maxiter is None else args.maxiter
     
-    
-    if torch.cuda.is_available():
+    if ALG_TYPE == 'sg':
+        device = 'cpu'
+        print('CUDA not supported for Stochastic Ghost')
+    elif torch.cuda.is_available():
         device = 'cuda'
         print('CUDA found')
     else:
         device = 'cpu'
         print('CUDA not found')
-    device = 'cpu'
     
     print(f'{device = }')    
     torch.set_default_device(device)
@@ -160,14 +197,14 @@ if __name__ == "__main__":
         
         if ALG_TYPE.startswith('swsg'):
             history = SwitchingSubgradient_unbiased(net, train_ds, w_idx_train, nw_idx_train,
-                                                   loss_bound=LOSS_BOUND,
-                                                   batch_size=BATCH_SIZE,
-                                                   epochs=2,
-                                                   ctol = LOSS_BOUND,
-                                                   f_stepsize_rule='dimin',
-                                                   f_stepsize=7e-1,
-                                                   c_stepsize_rule='dimin',
-                                                   c_stepsize=7e-1,
+                                                   loss_bound = LOSS_BOUND,
+                                                   batch_size = BATCH_SIZE,
+                                                   epochs = epochs,
+                                                   ctol = ctol,
+                                                   f_stepsize_rule = f_stepsize_rule,
+                                                   f_stepsize = f_stepsize,
+                                                   c_stepsize_rule = c_stepsize_rule,
+                                                   c_stepsize = c_stepsize,
                                                    device=device,
                                                    seed=EXP_IDX)
         elif ALG_TYPE.startswith('sg'):
@@ -183,7 +220,7 @@ if __name__ == "__main__":
                                   loss_bound=LOSS_BOUND,
                                   maxiter=MAXITER_GHOST,
                                   seed=EXP_IDX)
-        elif ALG_TYPE.startswith('aug'):
+        elif ALG_TYPE.startswith('aug') or ALG_TYPE == 'aug':
             history = AugLagr(net, train_ds,
                               w_idx_train,
                               nw_idx_train,
@@ -206,7 +243,7 @@ if __name__ == "__main__":
                          seed=EXP_IDX)
         ## SAVE RESULTS ##
         ftrial.append(pd.Series(history['loss']))
-        ctrial.append(history['constr'])
+        ctrial.append(pd.DataFrame(history['constr']))
         wtrial.append(history['w'])
         ttrial.append(history['time'])
         samples_trial.append(pd.Series(history['n_samples']))
@@ -223,7 +260,7 @@ if __name__ == "__main__":
     
     ftrial = pd.concat(ftrial, keys=range(len(ftrial)))
     ctrial = pd.concat(ctrial, keys=range(len(ctrial)))
-    samples_trial = pd.concat(samples_trial, keys=range(len(ctrial)))
+    samples_trial = pd.concat(samples_trial, keys=range(len(samples_trial)))
     
     if ALG_TYPE.startswith('sg'):
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{G_ALPHA}'

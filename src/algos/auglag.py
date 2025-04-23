@@ -48,7 +48,8 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
     history = {'loss': [],
                'constr': [],
                'w': [],
-               'time': []}
+               'time': [],
+               'n_samples': []}
     
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
@@ -79,9 +80,11 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
         
         current_time = timeit.default_timer()
         history['time'].append(current_time - run_start)
+        history['w'].append(deepcopy(net.state_dict()))
+        history['n_samples'].append(batch_size*3)
         if max_runtime > 0 and current_time - run_start >= max_runtime:
             print(current_time - run_start)
-            return
+            return history
         
         w_sample = next(loader_w)
         b_sample = next(loader_b)
@@ -123,6 +126,5 @@ def AugLagr(net: torch.nn.Module, data, w_ind, b_ind, batch_size, loss_bound, ma
                 
                 
         # old_constraint_eval = deepcopy(constraint_eval)
-        history['w'].append(deepcopy(net.state_dict()))
         
     return history

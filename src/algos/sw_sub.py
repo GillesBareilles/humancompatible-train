@@ -296,7 +296,8 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
     history = {'loss': [],
                'constr': [],
                'w': [],
-               'time': []}
+               'time': [],
+               'n_samples': []}
     
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
@@ -321,7 +322,6 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
         
         if current_time - run_start >= max_runtime:
             break
-        
         gen = torch.Generator(device=device)
         gen.manual_seed(seed+epoch)
         loader = torch.utils.data.DataLoader(data, batch_size, shuffle=True, generator=gen)
@@ -330,6 +330,7 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
         
         for iteration, f_sample in enumerate(loader):
             
+            history['n_samples'].append(batch_size*3)
             current_time = timeit.default_timer()
             history['time'].append(current_time - run_start)
             if max_runtime > 0 and current_time - run_start >= max_runtime:
@@ -408,6 +409,9 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
     ######################
     ### POSTPROCESSING ###    
     ######################
+    
+    
+    
     print('\n')
     print(c_iters)
     return history
