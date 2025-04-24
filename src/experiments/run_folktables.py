@@ -87,6 +87,7 @@ if __name__ == "__main__":
     parser.add_argument('-gamma0', '--gamma0', nargs='?', const=0.05, default=0.05, type=float)
     parser.add_argument('-zeta', '--zeta', nargs='?', const=0.3, default=0.3, type=float)
     parser.add_argument('-tau', '--tau', nargs='?', const=1, default=1, type=float)
+    parser.add_argument('-stepsize', '-sr', nargs='?', const='inv_iter', default='inv_iter', type=str)
     
     # ssg
     parser.add_argument('-frule', '--frule', nargs='?', const='dimin', default='dimin', type=str)
@@ -113,18 +114,30 @@ if __name__ == "__main__":
         ghost_gamma0 = args.gamma0
         ghost_zeta = args.zeta
         ghost_tau = args.tau
+        ghost_stepsize_rule = args.stepsize
     elif ALG_TYPE == 'swsg':
         epochs=args.epochs
         ctol = args.ctol
+        BATCH_SIZE = args.batch_size
         f_stepsize_rule=args.frule
         f_stepsize=args.f_stepsize
         c_stepsize_rule=args.crule
         c_stepsize=args.c_stepsize
     elif ALG_TYPE == 'aug':
         epochs=args.epochs
-        batch_size = args.batch_size
+        BATCH_SIZE = args.batch_size
         MAXITER_ALM = 1000 if args.maxiter is None else args.maxiter
-    
+    elif ALG_TYPE == 'sslalm':
+        epochs = args.epochs
+        BATCH_SIZE = args.batch_size
+        lambda_bound = 100,
+        rho = 1,
+        mu = 2.,
+        tau = 1e-3,
+        beta = 0.1,
+        eta = 5e-3,
+        
+        
     if ALG_TYPE == 'sg':
         device = 'cpu'
         print('CUDA not supported for Stochastic Ghost')
@@ -160,7 +173,7 @@ if __name__ == "__main__":
     UPDATE_LAMBDA = True
     # G_ALPHA = 0.3
     # ALG_TYPE = 'sg'
-    BATCH_SIZE = 16
+    # BATCH_SIZE = 16
     # MAXITER_GHOST = 1500
     MAXITER_ALM = np.inf
     MAXITER_SSG = np.inf
@@ -210,7 +223,7 @@ if __name__ == "__main__":
         elif ALG_TYPE.startswith('sg'):
             history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
                                   geomp=G_ALPHA,
-                                  stepsize_rule='inv_iter',
+                                  stepsize_rule=ghost_stepsize_rule,
                                   zeta = ghost_zeta,
                                   gamma0 = ghost_gamma0,
                                   beta=ghost_beta,
