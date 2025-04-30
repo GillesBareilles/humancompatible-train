@@ -9,6 +9,11 @@ from qpsolvers import solve_qp
 import autoray as ar
 import timeit
 from itertools import cycle
+
+from src.algos.constraints import *
+
+from fairret.statistic import *
+from fairret.loss import NormLoss
 from .utils import net_grads_to_tensor, net_params_to_tensor
 import cvxpy as cp
 import torch
@@ -97,24 +102,8 @@ def solvesubp(fgrad, cval, cgrad, kap_val, beta, tau, hesstype, mc, n, qp_solver
       beta*np.ones((n,)),
       qp_solver)
 
-def one_sided_loss_constr(loss, net, c_data):
-    w_inputs, w_labels = c_data[0]
-    b_inputs, b_labels = c_data[1]
-    w_outs = net(w_inputs)
-    if w_labels.ndim == 0:
-        w_labels = w_labels.reshape(1)
-        b_labels = b_labels.reshape(1)
-    else:
-        w_labels = w_labels.unsqueeze(1)
-        b_labels = b_labels.unsqueeze(1)
-    w_loss = loss(w_outs, w_labels)
-    b_outs = net(b_inputs)
-    b_loss = loss(b_outs, b_labels)
 
-    return w_loss - b_loss
-
-
-def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf,
+def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_runtime=np.inf, c_sample_half=False,
                     stepsize_rule = 'inv_iter', zeta=0.5, gamma0 = 0.1, rho=0.8, lamb=0.5, beta=10., tau=1.,seed=42):
     
     
@@ -122,6 +111,11 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
     
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
+    
+    # statistic = PositiveRate()
+    # norm_fairret = NormLoss(statistic)
+    # c1 = lambda net, d: fairret_pr_constr(norm_fairret, net, d) - loss_bound
+    # c2 = lambda net, d: fairret_pr_constr(norm_fairret, net, d) - loss_bound
     
     max_sample_size = max([len(w_ind), len(b_ind)])
     
@@ -178,8 +172,9 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
         indices_f, indices_c_w, indices_c_b = [],[],[]
         for j, subp_batch_size in enumerate(mbatches):
             idx_f = rng.choice(len(data), size=subp_batch_size)
-            idx_c_w = rng.choice(len(data_w), size=max(subp_batch_size//2, 1))
-            idx_c_b = rng.choice(len(data_b), size=max(subp_batch_size//2, 1))
+            c_bs = max(subp_batch_size//2, 1) if c_sample_half else subp_batch_size
+            idx_c_w = rng.choice(len(data_w), size=c_bs)
+            idx_c_b = rng.choice(len(data_b), size=c_bs)
             if j == 1:
                 indices_f.append(idx_f[::2]) # even
                 indices_f.append(idx_f[1::2]) # odd
@@ -209,13 +204,15 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
             
             # calculate autograd jacobian of obj fun w.r.t. params
             outs = net(obj_batch[0])
-            feval = loss_fn(outs, obj_batch[1].unsqueeze(1))
+            if obj_batch[1].ndim < outs.ndim:
+                outs = outs.squeeze(1)
+            feval = loss_fn(outs, obj_batch[1])
     
             feval.backward()
             dfdw = net_grads_to_tensor(net, clip=False)
-            net.zero_grad()
             
             # calculate autograd jacobian of constraints fun w.r.t. params
+            net.zero_grad()
             c1_val = c1(net, c1_batch)
             c1_val.backward()
             c1_grad = ar.to_numpy(net_grads_to_tensor(net, clip=False))
@@ -264,7 +261,7 @@ def StochasticGhost(net, data, w_ind, b_ind, geomp, loss_bound, maxiter, max_run
                 
         history['w'].append(deepcopy(net.state_dict()))
         
-        feval = loss_fn(outs, obj_batch[1].unsqueeze(1))
+        feval = loss_fn(outs, obj_batch[1])#.unsqueeze(1))
     
     history['constr'] = pd.DataFrame(history['constr'])
     return history

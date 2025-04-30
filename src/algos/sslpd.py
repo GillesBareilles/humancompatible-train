@@ -8,6 +8,8 @@ from qpsolvers import solve_qp
 import autoray as ar
 import timeit
 from itertools import cycle
+
+from src.algos.constraints import *
 from .utils import net_grads_to_tensor, net_params_to_tensor
 import cvxpy as cp
 import torch
@@ -17,22 +19,6 @@ m_st = 2
 import timeit
 constr_sampling_interval = 1
 max_runtime = 15
-
-def one_sided_loss_constr(loss, net, c_data):
-    w_inputs, w_labels = c_data[0]
-    b_inputs, b_labels = c_data[1]
-    w_outs = net(w_inputs)
-    if w_labels.ndim == 0:
-        w_labels = w_labels.reshape(1)
-        b_labels = b_labels.reshape(1)
-    else:
-        w_labels = w_labels.unsqueeze(1)
-        b_labels = b_labels.unsqueeze(1)
-    w_loss = loss(w_outs, w_labels)
-    b_outs = net(b_inputs)
-    b_loss = loss(b_outs, b_labels)
-
-    return w_loss - b_loss
 
 
 def project(x, m):
@@ -50,7 +36,8 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             mu = 2.,
             tau = 1e-4,
             beta = 0.1,
-            eta = 1e-3,
+            # eta = 1e-3,
+            eta = 5e-2,
             B = 1000,
             start_lambda=None,
             device='cpu',
@@ -61,7 +48,8 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     history = {'loss': [],
                'constr': [],
                'w': [],
-               'time': []}
+               'time': [],
+               'n_samples': []}
     
     # slack variables
     slack_vars = torch.zeros(2, requires_grad=True)
@@ -99,6 +87,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             current_time = timeit.default_timer()
             history['w'].append(deepcopy(net.state_dict()))
             history['time'].append(current_time - run_start)
+            history['n_samples'].append(batch_size*3)
             if max_runtime > 0 and current_time - run_start >= max_runtime:
                 break
             
@@ -169,8 +158,8 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
                 for i in range(len(slack_vars)):
                     slack_vars[i] = x_t1[i-len(slack_vars)]
                     
-            with np.printoptions(precision=6, suppress=True):
-                print(f"""{iteration}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{c_2.detach().cpu().numpy()}|{slack_vars.detach().cpu().numpy()}""", end='\r')
+            with np.printoptions(precision=6, suppress=True, floatmode='fixed'):
+                print(f"""{iteration:5}|{loss_eval.detach().cpu().numpy()}|{_lambda.detach().cpu().numpy()}|{c_2.detach().cpu().numpy()}|{slack_vars.detach().cpu().numpy()}""", end='\r')
         
     ######################
     ### POSTPROCESSING ###    
@@ -227,8 +216,9 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
         _set_weights(net, x_t1)
     
     current_time = timeit.default_timer()
-    history['time'].append(current_time - run_start)
-    history['w'].append(deepcopy(net.state_dict()))
+    # history['time'].append(current_time - run_start)
+    # history['w'].append(deepcopy(net.state_dict()))
+    # history['batch_size']
     
     return history
 

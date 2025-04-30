@@ -9,7 +9,8 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "args": ["-state", "OK", "-alg", "aug", "-ne", "5", "-loss_bound","0.005","-task","income", "-constraint","fpr"]
         }
     ]
 }

@@ -11,9 +11,10 @@ from torch.utils.data import TensorDataset, DataLoader
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
         
+from src.algos.constraints import one_sided_loss_constr
 from src.algos.sslpd import SSLPD
 from src.algos.sw_sub import SwitchingSubgradient_unbiased
-from src.algos.auglag import AugLagr
+from src.algos.auglag import *
 from src.algos.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
@@ -45,24 +46,6 @@ class SimpleDiffNet(nn.Module):
     def forward(self, x):
         logits = self.linear_gelu_stack(x)
         return logits
-
-def one_sided_loss_constr(loss, net, c_data):
-    w_inputs, w_labels = c_data[0]
-    b_inputs, b_labels = c_data[1]
-    w_outs = net(w_inputs)
-    w_loss = loss(w_outs, w_labels.unsqueeze(1))
-    b_outs = net(b_inputs)
-    b_loss = loss(b_outs, b_labels.unsqueeze(1))
-
-    return w_loss - b_loss
-
-def roc_constraint(loss, net, c_data):
-    w_inputs, w_labels = c_data[0]
-    b_inputs, b_labels = c_data[1]
-    w_outs = net(w_inputs)
-    b_outs = net(b_inputs)
-    
-    # thresholds = 
     
 
 
@@ -76,6 +59,10 @@ if __name__ == "__main__":
     ### experiment parameters
     parser.add_argument('-alg', '--algorithm')
     parser.add_argument('-ne', '--num_exp', type=int)
+    parser.add_argument('-task', '--task', type=str)
+    parser.add_argument('-state', '--state', type=str)
+    parser.add_argument('-loss_bound', '--loss_bound', type=float)
+    parser.add_argument('-constraint', '--constraint', type=str)
     
     ### algorithm parameters
     parser.add_argument('-maxiter', '--maxiter', nargs='?', const=None, type=int)
@@ -89,21 +76,29 @@ if __name__ == "__main__":
     parser.add_argument('-tau', '--tau', nargs='?', const=1, default=1, type=float)
     parser.add_argument('-stepsize', '-sr', nargs='?', const='inv_iter', default='inv_iter', type=str)
     
+    
+    # alm
+    parser.add_argument('-bs', '--batch_size', nargs='?', const=16, default=16, type=int)
+    
     # ssg
     parser.add_argument('-frule', '--frule', nargs='?', const='dimin', default='dimin', type=str)
     parser.add_argument('-fs', '--f_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
     parser.add_argument('-crule', '--crule', nargs='?', const='dimin', default='dimin', type=str)
     parser.add_argument('-cs', '--c_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
-    parser.add_argument('-e', '--epochs', nargs='?', const=1, default=1, type=int)
-    parser.add_argument('-ctol', '--ctol', nargs='?', const=1e-3, default=1e-3, type=float)
+    parser.add_argument('-epochs', '--epochs', nargs='?', const=1, default=1, type=int)
+    parser.add_argument('-ctol', '--ctol', nargs=1, type=float)
     
-    # alm
-    parser.add_argument('-bs', '--batch_size', nargs='?', const=8, default=8, type=int)
+    # sslalm
+    parser.add_argument('-mu', '--mu', nargs='?', const=2, default=2, type=float)
     
     # parse args
     args = parser.parse_args()
     ALG_TYPE = args.algorithm
     EXP_NUM = args.num_exp
+    FT_STATE = args.state
+    LOSS_BOUND = args.loss_bound
+    CONSTRAINT = args.constraint
+    TASK = args.task
     
     if ALG_TYPE == 'sg':
         G_ALPHA = args.geomp
@@ -130,12 +125,12 @@ if __name__ == "__main__":
     elif ALG_TYPE == 'sslalm':
         epochs = args.epochs
         BATCH_SIZE = args.batch_size
-        lambda_bound = 100,
-        rho = 1,
-        mu = 2.,
-        tau = 1e-3,
-        beta = 0.1,
-        eta = 5e-3,
+        lambda_bound = 100
+        rho = args.rho
+        mu = args.mu
+        tau = args.tau
+        beta = args.beta
+        eta = 5e-3
         
         
     if ALG_TYPE == 'sg':
@@ -153,22 +148,22 @@ if __name__ == "__main__":
     
     DTYPE = torch.float32
 
-    DATASET_NAME = 'employment_az'
-    FT_DATASET, FT_STATE = DATASET_NAME.split('_')
+    FT_DATASET = TASK
     torch.set_default_dtype(DTYPE)
+    DATASET_NAME = FT_DATASET + '_' + FT_STATE
     
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
-        FT_DATASET, state=FT_STATE.upper(), random_state=0, make_unbalanced = False
+        FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False, onehot=False
     )
         
     X_train_tensor = tensor(X_train, dtype=DTYPE)
     y_train_tensor = tensor(y_train, dtype=DTYPE)
     train_ds = TensorDataset(X_train_tensor,y_train_tensor)
-    print(f'Train data loaded: {DATASET_NAME}')
+    print(f'Train data loaded: {(FT_DATASET, FT_STATE)}')
+    print(f'Data shape: {X_train_tensor.shape}')
     
     # TODO: move to command line args
     # EXP_NUM = 7
-    LOSS_BOUND = 0.005
     RUNTIME_LIMIT = 15
     UPDATE_LAMBDA = True
     # G_ALPHA = 0.3
@@ -242,18 +237,22 @@ if __name__ == "__main__":
                               update_lambda=UPDATE_LAMBDA,
                               maxiter=MAXITER_ALM,
                               device=device,
+                              epochs=epochs,
                               seed=EXP_IDX)
         elif ALG_TYPE.startswith('sslalm'):
-            history = SSLPD(net, train_ds, w_idx_train, nw_idx_train, loss_bound=LOSS_BOUND,
-                         lambda_bound = 100,
-                         rho = 1,
-                         mu = 2.,
-                         tau = 1e-3,
-                         beta = 0.1,
-                         eta = 5e-3,
-                         max_iter=MAXITER_SSLALM,
-                         device=device,
-                         seed=EXP_IDX)
+            history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
+                            loss_bound=LOSS_BOUND,
+                            epochs=epochs,
+                            batch_size=BATCH_SIZE,
+                            lambda_bound = 10.,
+                            rho = rho,
+                            mu = mu,
+                            tau = tau,
+                            beta = beta,
+                            eta = 5e-2,
+                            max_iter=MAXITER_SSLALM,
+                            device=device,
+                            seed=EXP_IDX)
         ## SAVE RESULTS ##
         ftrial.append(pd.Series(history['loss']))
         ctrial.append(pd.DataFrame(history['constr']))
@@ -291,11 +290,11 @@ if __name__ == "__main__":
     full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize', 'time'])
     full_stats.sort_index(inplace=True)
     
-    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1, dtype=DTYPE).cuda()
+    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1, dtype=DTYPE).to(device)
     loss_fn = nn.BCEWithLogitsLoss()
     
-    X_test_tensor = tensor(X_test, dtype=DTYPE).cuda()
-    y_test_tensor = tensor(y_test, dtype=DTYPE).cuda()
+    X_test_tensor = tensor(X_test, dtype=DTYPE).to(device)
+    y_test_tensor = tensor(y_test, dtype=DTYPE).to(device)
     
     X_test_w = X_test_tensor[w_idx_test]
     y_test_w = y_test_tensor[w_idx_test]
@@ -307,28 +306,50 @@ if __name__ == "__main__":
     X_train_nw = X_train_tensor[nw_idx_train]
     y_train_nw = y_train_tensor[nw_idx_train]
     
-    save_train = False
+    save_train = True
+    
+    
     with torch.inference_mode():
         for exp_idx in range(EXP_NUM):
             weights_to_eval = wtrial[exp_idx][::TEST_SKIP_ITERS]
             for alg_iteration, w in enumerate(weights_to_eval):
-
+                
+                if CONSTRAINT == 'loss':
+                    c_f = one_sided_loss_constr
+                    c_loss_fn = nn.BCEWithLogitsLoss()
+                elif CONSTRAINT == 'fpr':
+                    c_f = fairret_constr
+                    statistic = FalsePositiveRate()
+                    c_loss_fn = NormLoss(statistic)
+                elif CONSTRAINT == 'pr':
+                    c_f = fairret_pr_constr
+                    statistic = PositiveRate()
+                    c_loss_fn = NormLoss(statistic)
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 net.load_state_dict(w)
                 
                 if save_train:
                     outs = net(X_train_tensor)
-                    loss = loss_fn(outs, y_train_tensor.unsqueeze(1)).detach().cpu().numpy()
+                    if y_train_tensor.ndim < outs.ndim:
+                        y_train_tensor = y_train_tensor.unsqueeze(1)
+                    loss = loss_fn(outs, y_train_tensor).detach().cpu().numpy()
                     
-                    c1 = one_sided_loss_constr(loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().cpu().numpy()
+                    c1 = c_f(c_loss_fn, net, [(X_train_w, y_train_w), (X_train_nw, y_train_nw)]).detach().cpu().numpy()
                     c2 = -c1
                     # pandas multiindex bug(?) workaround
-                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {'Loss': loss, 'C1': c1, 'C2': c2, 'SampleSize': 1}
+                    full_stats.loc['train'].at[alg_iteration, exp_idx] = {
+                    'Loss': loss,
+                    'C1': c1,
+                    'C2': c2,
+                    'SampleSize': samples_trial[exp_idx][alg_iteration],
+                    'time': ttrial[exp_idx][alg_iteration]}
                     
                 outs = net(X_test_tensor)
-                loss = loss_fn(outs, y_test_tensor.unsqueeze(1)).detach().cpu().numpy()
+                if y_test_tensor.ndim < outs.ndim:
+                    y_test_tensor = y_test_tensor.unsqueeze(1)
+                loss = loss_fn(outs, y_test_tensor).detach().cpu().numpy()
                 
-                c1 = one_sided_loss_constr(loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
+                c1 = c_f(c_loss_fn, net, [(X_test_w, y_test_w), (X_test_nw, y_test_nw)]).detach().cpu().numpy()
                 c2 = -c1
                 
                 full_stats.loc['test'].at[alg_iteration, exp_idx] = {

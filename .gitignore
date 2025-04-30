@@ -1,7 +1,7 @@
 # Dataset and saved models
 
 src/experiments/utils/raw_data/
-
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
