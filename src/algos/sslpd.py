@@ -10,12 +10,15 @@ import timeit
 from itertools import cycle
 
 from src.algos.constraints import *
-from .utils import net_grads_to_tensor, net_params_to_tensor
-import cvxpy as cp
+from fairret.statistic import *
+# from fairret.metric import *
+from fairret.loss import *
+from .utils import *
+from .constraints import *
 import torch
 
-m_det = 0
-m_st = 2
+# m_det = 0
+# m_st = 2
 import timeit
 constr_sampling_interval = 1
 max_runtime = 15
@@ -43,7 +46,8 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             device='cpu',
             epochs=1,
             seed = 42,
-            max_iter = None):
+            max_iter = None,
+            fairret_statistic = None):
         
     history = {'loss': [],
                'constr': [],
@@ -51,21 +55,38 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
                'time': [],
                'n_samples': []}
     
-    # slack variables
-    slack_vars = torch.zeros(2, requires_grad=True)
-    
-    c1 = lambda net, d, s: one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
-    c2 = lambda net, d, s: -one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
-    
-    c = [c1, c2]
-    
     data_w = torch.utils.data.Subset(data, w_ind)
     data_b = torch.utils.data.Subset(data, b_ind)
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
-    n = sum(p.numel() for p in net.parameters())
     
-    _lambda = torch.zeros(len(c),requires_grad=True) if start_lambda is None else start_lambda
+    if fairret_statistic is None:
+        c1 = lambda net, d, s: one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
+        c2 = lambda net, d, s: -one_sided_loss_constr(loss_fn, net, d) - loss_bound + s
+        c = [c1, c2]
+    elif isinstance(fairret_statistic, list):
+        c = []
+        for stat in fairret_statistic:
+            if isinstance(stat, PositiveRate):
+                con = lambda net, d, s: fairret_pr_constr(NormLoss(stat), net, d) - loss_bound + s
+            else:
+                con = lambda net, d, s: fairret_constr(NormLoss(stat), net, d) - loss_bound + s
+            c.append(con)
+            
+    elif isinstance(fairret_statistic, PositiveRate):
+        norm_fairret = NormLoss(fairret_statistic)
+        c1 = lambda net, d, s: fairret_pr_constr(norm_fairret, net, d) - loss_bound + s
+        c = [c1]
+    elif isinstance(fairret_statistic, FalsePositiveRate):
+        norm_fairret = NormLoss(fairret_statistic)
+        c1 = lambda net, d, s: fairret_constr(norm_fairret, net, d) - loss_bound + s
+        c = [c1]
+        
+    m = len(c)
+    # slack variables
+    slack_vars = torch.zeros(m, requires_grad=True)
+    
+    _lambda = torch.zeros(m, requires_grad=True) if start_lambda is None else start_lambda
     z = torch.concat([
             net_params_to_tensor(net, flatten=True, copy=True),
             slack_vars
@@ -122,7 +143,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             loss_eval = loss_fn(outputs, f_labels)
             loss_eval.backward() # loss grad
             f_grad = net_grads_to_tensor(net)
-            f_grad = torch.concat([f_grad, torch.zeros(len(c))]) # add zeros for slack vars
+            f_grad = torch.concat([f_grad, torch.zeros(m)]) # add zeros for slack vars
             net.zero_grad()
             
             # constraint grad estimate
@@ -150,7 +171,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
             
             G = f_grad + c_grad.T @ _lambda + rho*(c_grad.T @ c_2) + mu*(x_t - z)
 
-            x_t1 = project(x_t - tau*G, 2)
+            x_t1 = project(x_t - tau*G, m)
             z += beta*(x_t-z)
             
             with torch.no_grad():
@@ -185,7 +206,7 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     # loss grad
     loss_eval.backward()
     f_grad = net_grads_to_tensor(net)
-    f_grad = torch.concat([f_grad, torch.zeros(2)]) # add zeros for slack vars
+    f_grad = torch.concat([f_grad, torch.zeros(m)]) # add zeros for slack vars
     net.zero_grad()
     # constraint grad estimate
     c_1 = [
@@ -211,14 +232,14 @@ def SSLPD(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
     ])
     G_hat += f_grad + c_grad.T @ _lambda + rho*(c_grad.T @ c_2) + mu*(x_t - z)
         
-    x_t1 = project(x_t - tau*G_hat, 2)
+    x_t1 = project(x_t - tau*G_hat, m)
     with torch.no_grad():
         _set_weights(net, x_t1)
     
     current_time = timeit.default_timer()
-    # history['time'].append(current_time - run_start)
-    # history['w'].append(deepcopy(net.state_dict()))
-    # history['batch_size']
+    history['w'].append(deepcopy(net.state_dict()))
+    history['time'].append(current_time - run_start)
+    history['n_samples'].append(batch_size*3)
     
     return history
 

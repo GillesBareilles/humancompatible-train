@@ -26,7 +26,10 @@ def fairret_constr(loss, net, c_data):
     b_onehot = torch.tensor([[1., 0.]]*len(b_inputs))
     logits = torch.concat([w_logits, b_logits])
     sens = torch.vstack([w_onehot, b_onehot])
-    labels = torch.vstack([w_labels, b_labels])
+    labels = torch.hstack([w_labels, b_labels]).unsqueeze(1)
+    # print(logits.shape)
+    # print(sens.shape)
+    # print(labels.shape)
     
     return loss(logits, sens, label=labels)
 

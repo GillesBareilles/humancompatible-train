@@ -45,7 +45,7 @@ def AugLagr(net: torch.nn.Module, dataset, w_ind, b_ind, batch_size, loss_bound,
     c1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - loss_bound
     c2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - loss_bound
     
-    statistic = PositiveRate()
+    # statistic = PositiveRate()
     # norm_fairret = NormLoss(statistic)
     # c1 = lambda net, d: fairret_pr_constr(norm_fairret, net, d) - loss_bound
     # c2 = lambda net, d: fairret_pr_constr(norm_fairret, net, d) - loss_bound
@@ -59,7 +59,7 @@ def AugLagr(net: torch.nn.Module, dataset, w_ind, b_ind, batch_size, loss_bound,
     loader_b = cycle(torch.utils.data.DataLoader(data_b, c_bs, shuffle=True, generator=gen))
     
     loss_fn = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-2)
+    optimizer = torch.optim.Adam(net.parameters(), lr=5e-3)
     n = sum(p.numel() for p in net.parameters())
     
     _lambda = torch.zeros(2) if start_lambda is None else start_lambda
@@ -121,10 +121,13 @@ def AugLagr(net: torch.nn.Module, dataset, w_ind, b_ind, batch_size, loss_bound,
             # with torch.inference_mode():
             for i in range(len(constraint_eval_updated)):
                 if iteration != 0 and constraint_eval_updated[i] > 0.5*constraint_eval[i]:
-                    lambda_upd = _lambda[i] + (7e-3) * c * torch.abs(constraint_eval_updated[i])**(p-1)
-                    if update_lambda and lambda_upd < lambda_bound:
-                        _lambda[i] = lambda_upd
-                
+                    lambda_upd = _lambda[i] + (3e-2) * c * torch.abs(constraint_eval_updated[i])**(p-1)
+                    # if update_lambda and lambda_upd < lambda_bound:
+                        # _lambda[i] = lambda_upd
+                    if lambda_upd > lambda_bound:
+                        lambda_upd = 0.
+                    _lambda[i] = lambda_upd
+
             # if c*1.01 < pmult_bound:
             #     c *= 1.01
                 

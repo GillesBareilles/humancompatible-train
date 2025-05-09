@@ -18,7 +18,6 @@ m_det = 0
 m_st = 2
 import timeit
 constr_sampling_interval = 1
-max_runtime = 15
 
 def project(x, m):
     # for i in range(1,m+1):
@@ -166,18 +165,18 @@ def SwitchingSubgradient(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
 
 
 def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss_bound,
-            batch_size=8,
-            max_runtime=np.inf,
             # ctol_rule = 'dimin',
-            ctol = 1e-1,
+            ctol,
             # ctol_min = 1e-5,
-            f_stepsize_rule = 'dimin',
-            f_stepsize = 5e-1,
-            c_stepsize_rule = 'adaptive',
-            c_stepsize = None,
+            f_stepsize_rule,
+            f_stepsize,
+            c_stepsize_rule,
+            c_stepsize,
             device='cpu',
+            batch_size=8,
             epochs=1,
-            seed = 42):
+            seed = 42,
+            max_runtime=np.inf):
         
     history = {'loss': [],
                'constr': [],
@@ -215,8 +214,6 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
         loader_b = cycle(torch.utils.data.DataLoader(data_b, batch_size, shuffle=True, generator=gen))
         
         for iteration, f_sample in enumerate(loader):
-            
-            history['n_samples'].append(batch_size*3)
             current_time = timeit.default_timer()
             history['time'].append(current_time - run_start)
             if max_runtime > 0 and current_time - run_start >= max_runtime:
@@ -246,6 +243,8 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
             
             if c_max >= ctol:
                 c_iters += 1
+            
+                history['n_samples'].append(batch_size*2)
                 # calculate grad on an independent sample
                 cw_sample = next(loader_w)
                 cb_sample = next(loader_b)
@@ -263,6 +262,8 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
                 
                 x_t1 = project(x_t - c_eta_t*c_grad, m=2)
             else:
+            
+                history['n_samples'].append(batch_size)
                 f_iters += 1
                 f_inputs, f_labels = f_sample
                 outputs = net(f_inputs)
@@ -289,7 +290,7 @@ def SwitchingSubgradient_unbiased(net: torch.nn.Module, data, w_ind, b_ind, loss
             
             if loss_eval is not None and c_t is not None:
                 with np.printoptions(precision=6, suppress=True):
-                    print(f'{iteration:5}|{loss_eval.detach().cpu().numpy()}|{c_t.detach().cpu().numpy()}', end='\r')
+                    print(f'{epoch:2} | {iteration:5}|{loss_eval.detach().cpu().numpy()}|{c_t.detach().cpu().numpy()}', end='\r')
             history['w'].append(deepcopy(net.state_dict()))
         
     ######################

@@ -63,6 +63,8 @@ if __name__ == "__main__":
     parser.add_argument('-state', '--state', type=str)
     parser.add_argument('-loss_bound', '--loss_bound', type=float)
     parser.add_argument('-constraint', '--constraint', type=str)
+    parser.add_argument('-alg_name', '--alg_name', type=str, nargs='?', const='', default='')
+    parser.add_argument('-device', '--device', type=str)
     
     ### algorithm parameters
     parser.add_argument('-maxiter', '--maxiter', nargs='?', const=None, type=int)
@@ -85,12 +87,16 @@ if __name__ == "__main__":
     parser.add_argument('-fs', '--f_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
     parser.add_argument('-crule', '--crule', nargs='?', const='dimin', default='dimin', type=str)
     parser.add_argument('-cs', '--c_stepsize', nargs='?', const=7e-1, default=7e-1, type=float)
-    parser.add_argument('-epochs', '--epochs', nargs='?', const=1, default=1, type=int)
-    parser.add_argument('-ctol', '--ctol', nargs=1, type=float)
+    parser.add_argument('-epochs', '--epochs', nargs='?', const=4, default=4, type=int)
+    parser.add_argument('-ctol', '--ctol', nargs='?', type=float)
     
     # sslalm
     parser.add_argument('-mu', '--mu', nargs='?', const=2, default=2, type=float)
+    parser.add_argument('-eta', '--eta', nargs='?', const=1e-2, default=1e-2, type=float)
     
+    #fairret
+    parser.add_argument('-fconstr', '--fconstr', nargs=1, type=str)
+
     # parse args
     args = parser.parse_args()
     ALG_TYPE = args.algorithm
@@ -99,8 +105,18 @@ if __name__ == "__main__":
     LOSS_BOUND = args.loss_bound
     CONSTRAINT = args.constraint
     TASK = args.task
+    ALG_CUSTOM_NAME = args.alg_name
     
-    if ALG_TYPE == 'sg':
+    if ALG_TYPE.startswith('sgd'):
+        epochs = args.epochs
+        BATCH_SIZE = args.batch_size
+        params_str = f'bs{BATCH_SIZE}'
+    if ALG_TYPE.startswith('fairret'):
+        epochs = args.epochs
+        BATCH_SIZE = args.batch_size
+        fconstr = args.fconstr[0]
+        params_str = f'bs{BATCH_SIZE}c{fconstr}'
+    elif ALG_TYPE.startswith('sg'):
         G_ALPHA = args.geomp
         MAXITER_GHOST = 1000 if args.maxiter is None else args.maxiter
         ghost_rho = args.rho
@@ -110,7 +126,8 @@ if __name__ == "__main__":
         ghost_zeta = args.zeta
         ghost_tau = args.tau
         ghost_stepsize_rule = args.stepsize
-    elif ALG_TYPE == 'swsg':
+        params_str = f'a{G_ALPHA}rho{ghost_rho}beta{ghost_beta}lambda{ghost_lambda}gamma{ghost_gamma0}zeta{ghost_zeta}tau{ghost_tau}ss{ghost_stepsize_rule}'
+    elif ALG_TYPE.startswith('swsg'):
         epochs=args.epochs
         ctol = args.ctol
         BATCH_SIZE = args.batch_size
@@ -118,11 +135,12 @@ if __name__ == "__main__":
         f_stepsize=args.f_stepsize
         c_stepsize_rule=args.crule
         c_stepsize=args.c_stepsize
-    elif ALG_TYPE == 'aug':
+        params_str = f'ctol{ctol}fsr{f_stepsize_rule}fs{f_stepsize}csr{c_stepsize_rule}cs{c_stepsize}'
+    elif ALG_TYPE.startswith('aug'):
         epochs=args.epochs
         BATCH_SIZE = args.batch_size
         MAXITER_ALM = 1000 if args.maxiter is None else args.maxiter
-    elif ALG_TYPE == 'sslalm':
+    elif ALG_TYPE.startswith('sslalm'):
         epochs = args.epochs
         BATCH_SIZE = args.batch_size
         lambda_bound = 100
@@ -130,10 +148,16 @@ if __name__ == "__main__":
         mu = args.mu
         tau = args.tau
         beta = args.beta
-        eta = 5e-3
-        
-        
-    if ALG_TYPE == 'sg':
+        eta = args.eta
+        params_str = f'mu{mu}rho{rho}tau{tau}eta{eta}beta{beta}'
+    
+    if ALG_CUSTOM_NAME == '':
+        ALG_CUSTOM_NAME = params_str
+    ALG_TYPE += '_'+ALG_CUSTOM_NAME
+    
+    if args.device == 'cpu':
+        device = 'cpu'
+    elif ALG_TYPE.startswith('sg'):
         device = 'cpu'
         print('CUDA not supported for Stochastic Ghost')
     elif torch.cuda.is_available():
@@ -177,9 +201,16 @@ if __name__ == "__main__":
     
     read_model = False
     
+    if CONSTRAINT == 'fpr':
+        statistic = FalsePositiveRate()
+    elif CONSTRAINT == 'pr':
+        statistic = PositiveRate()
+    else:
+        statistic = None
+    
     saved_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils', 'saved_models'))
-    directory = os.path.join(saved_models_path, DATASET_NAME,f'{LOSS_BOUND:.0E}')
-    if ALG_TYPE.startswith('sg'):
+    directory = os.path.join(saved_models_path, DATASET_NAME,CONSTRAINT,f'{LOSS_BOUND:.0E}')
+    if ALG_TYPE.startswith('sg') and not ALG_TYPE.startswith('sgd'):
         model_name = os.path.join(directory, f'{ALG_TYPE}_{LOSS_BOUND}_p{G_ALPHA}')
     else:
         model_name = os.path.join(directory, f'{ALG_TYPE}_{LOSS_BOUND}')
@@ -204,6 +235,7 @@ if __name__ == "__main__":
         
         
         if ALG_TYPE.startswith('swsg'):
+            # print(epochs)
             history = SwitchingSubgradient_unbiased(net, train_ds, w_idx_train, nw_idx_train,
                                                    loss_bound = LOSS_BOUND,
                                                    batch_size = BATCH_SIZE,
@@ -215,6 +247,75 @@ if __name__ == "__main__":
                                                    c_stepsize = c_stepsize,
                                                    device=device,
                                                    seed=EXP_IDX)
+            print(len(history['w']))
+            
+        elif ALG_TYPE.startswith('fairret'):
+            if fconstr == 'pr':
+                statistic = PositiveRate()
+            if fconstr == 'tpr':
+                statistic = TruePositiveRate()
+            elif fconstr == 'fnfp':
+                statistic = FalseNegativeFalsePositiveFraction()
+            elif fconstr == 'fscore':
+                statistic = FScore()
+            elif fconstr == 'acc':
+                statistic = Accuracy()
+            norm_fairret = NormLoss(statistic)
+            run_start = timeit.default_timer()
+            current_time = timeit.default_timer()
+            data_w = torch.utils.data.Subset(train_ds, w_idx_train)
+            data_b = torch.utils.data.Subset(train_ds, nw_idx_train)
+            history = {'loss': [], 'constr': [], 'w': [], 'time': [], 'n_samples': []}
+            loss_fn = torch.nn.BCEWithLogitsLoss()
+            optimizer = torch.optim.SGD(net.parameters(), lr=5e-2)
+            for epoch in range(epochs):
+                gen = torch.Generator(device=device)
+                gen.manual_seed(EXP_IDX+epoch)
+                loader_w = torch.utils.data.DataLoader(data_w, BATCH_SIZE, shuffle=True, generator=gen, drop_last=True)
+                loader_b = torch.utils.data.DataLoader(data_b, BATCH_SIZE, shuffle=True, generator=gen, drop_last=True)
+                for i, ((inputs_w, labels_w), (inputs_b, labels_b)) in enumerate(zip(loader_w, loader_b)):
+                    current_time = timeit.default_timer()
+                    history['time'].append(current_time - run_start)
+                    history['n_samples'].append(BATCH_SIZE)
+                    net.zero_grad()
+                    if i == len(loader_w):
+                        break
+                    inputs = torch.concat([inputs_w, inputs_b])
+                    labels = torch.concat([labels_w, labels_b])
+                    group_ind_onehot = torch.tensor([[0]*BATCH_SIZE + [1]*BATCH_SIZE, [1]*BATCH_SIZE + [0]*BATCH_SIZE]).T
+                    outputs = net(inputs)
+                    loss_bce = loss_fn(outputs.squeeze(), labels)
+                    if fconstr == 'pr':
+                        loss_fr = norm_fairret(outputs.squeeze(), group_ind_onehot)
+                    else:
+                        loss_fr = norm_fairret(outputs, group_ind_onehot, labels.unsqueeze(1))
+                    loss = loss_bce + 0.1*loss_fr
+                    loss.backward()
+                    optimizer.step()
+                    
+                    history['w'].append(deepcopy(net.state_dict()))
+                
+        elif ALG_TYPE.startswith('sgd'):
+            run_start = timeit.default_timer()
+            current_time = timeit.default_timer()
+            loss_fn = torch.nn.BCEWithLogitsLoss()
+            optimizer = torch.optim.SGD(net.parameters(), lr=5e-3)
+            train_ds = TensorDataset(X_train_tensor.to(device),y_train_tensor.to(device))
+            train_l = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+            history = {'loss': [], 'constr': [], 'w': [], 'time': [], 'n_samples': []}
+            for _ in range(epochs):
+                for i, (inputs, labels) in enumerate(train_l):
+                    current_time = timeit.default_timer()
+                    history['time'].append(current_time - run_start)
+                    history['n_samples'].append(BATCH_SIZE)
+                    
+                    net.zero_grad()
+                    outputs = net(inputs)
+                    loss = loss_fn(outputs.squeeze(), labels)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    history['w'].append(deepcopy(net.state_dict()))
         elif ALG_TYPE.startswith('sg'):
             history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
                                   geomp=G_ALPHA,
@@ -242,6 +343,7 @@ if __name__ == "__main__":
         elif ALG_TYPE.startswith('sslalm'):
             history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
                             loss_bound=LOSS_BOUND,
+                            fairret_statistic= statistic,
                             epochs=epochs,
                             batch_size=BATCH_SIZE,
                             lambda_bound = 10.,
@@ -249,7 +351,7 @@ if __name__ == "__main__":
                             mu = mu,
                             tau = tau,
                             beta = beta,
-                            eta = 5e-2,
+                            eta = eta,
                             max_iter=MAXITER_SSLALM,
                             device=device,
                             seed=EXP_IDX)
@@ -274,7 +376,7 @@ if __name__ == "__main__":
     ctrial = pd.concat(ctrial, keys=range(len(ctrial)))
     samples_trial = pd.concat(samples_trial, keys=range(len(samples_trial)))
     
-    if ALG_TYPE.startswith('sg'):
+    if ALG_TYPE.startswith('sg') and not ALG_TYPE.startswith('sgd'):
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{G_ALPHA}'
     else:
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}'
@@ -290,7 +392,9 @@ if __name__ == "__main__":
     full_stats = pd.DataFrame(index=index, columns=['Loss', 'C1', 'C2', 'SampleSize', 'time'])
     full_stats.sort_index(inplace=True)
     
-    net = SimpleNet(in_shape=X_test.shape[1], out_shape=1, dtype=DTYPE).to(device)
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # torch.set_default_device(device)
+    
     loss_fn = nn.BCEWithLogitsLoss()
     
     X_test_tensor = tensor(X_test, dtype=DTYPE).to(device)
@@ -326,7 +430,10 @@ if __name__ == "__main__":
                     statistic = PositiveRate()
                     c_loss_fn = NormLoss(statistic)
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
+                # TRANSFER TO CUDA
+                # net.load_state_dict([lw.to(device) for lw in w])
                 net.load_state_dict(w)
+                net = net.to(device)
                 
                 if save_train:
                     outs = net(X_train_tensor)
@@ -359,7 +466,7 @@ if __name__ == "__main__":
                     'SampleSize': samples_trial[exp_idx][alg_iteration],
                     'time': ttrial[exp_idx][alg_iteration]}
             
-    if ALG_TYPE.startswith('sg'):
+    if ALG_TYPE.startswith('sg') and not ALG_TYPE.startswith('sgd'):
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}_{G_ALPHA}.csv'
     else:
         fname = f'{ALG_TYPE}_{DATASET_NAME}_{LOSS_BOUND}.csv'
