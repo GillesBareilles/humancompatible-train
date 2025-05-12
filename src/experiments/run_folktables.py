@@ -58,6 +58,7 @@ if __name__ == "__main__":
     
     ### experiment parameters
     parser.add_argument('-alg', '--algorithm')
+    parser.add_argument('-time', '--time', type=int)
     parser.add_argument('-ne', '--num_exp', type=int)
     parser.add_argument('-task', '--task', type=str)
     parser.add_argument('-state', '--state', type=str)
@@ -77,7 +78,6 @@ if __name__ == "__main__":
     parser.add_argument('-zeta', '--zeta', nargs='?', const=0.3, default=0.3, type=float)
     parser.add_argument('-tau', '--tau', nargs='?', const=1, default=1, type=float)
     parser.add_argument('-stepsize', '-sr', nargs='?', const='inv_iter', default='inv_iter', type=str)
-    
     
     # alm
     parser.add_argument('-bs', '--batch_size', nargs='?', const=16, default=16, type=int)
@@ -106,6 +106,7 @@ if __name__ == "__main__":
     CONSTRAINT = args.constraint
     TASK = args.task
     ALG_CUSTOM_NAME = args.alg_name
+    MAX_TIME = args.time
     
     if ALG_TYPE.startswith('sgd'):
         epochs = args.epochs
@@ -246,7 +247,8 @@ if __name__ == "__main__":
                                                    c_stepsize_rule = c_stepsize_rule,
                                                    c_stepsize = c_stepsize,
                                                    device=device,
-                                                   seed=EXP_IDX)
+                                                   seed=EXP_IDX,
+                                                   max_runtime = MAX_TIME)
             print(len(history['w']))
             
         elif ALG_TYPE.startswith('fairret'):
@@ -275,7 +277,10 @@ if __name__ == "__main__":
                 loader_b = torch.utils.data.DataLoader(data_b, BATCH_SIZE, shuffle=True, generator=gen, drop_last=True)
                 for i, ((inputs_w, labels_w), (inputs_b, labels_b)) in enumerate(zip(loader_w, loader_b)):
                     current_time = timeit.default_timer()
-                    history['time'].append(current_time - run_start)
+                    elapsed = current_time - run_start
+                    if elapsed > MAX_TIME:
+                        break
+                    history['time'].append(elapsed)
                     history['n_samples'].append(BATCH_SIZE)
                     net.zero_grad()
                     if i == len(loader_w):
@@ -306,7 +311,10 @@ if __name__ == "__main__":
             for _ in range(epochs):
                 for i, (inputs, labels) in enumerate(train_l):
                     current_time = timeit.default_timer()
-                    history['time'].append(current_time - run_start)
+                    elapsed = current_time - run_start
+                    if elapsed > MAX_TIME:
+                        break
+                    history['time'].append(elapsed)
                     history['n_samples'].append(BATCH_SIZE)
                     
                     net.zero_grad()
@@ -328,7 +336,8 @@ if __name__ == "__main__":
                                   tau = ghost_tau,
                                   loss_bound=LOSS_BOUND,
                                   maxiter=MAXITER_GHOST,
-                                  seed=EXP_IDX)
+                                  seed=EXP_IDX,
+                                  max_runtime = MAX_TIME)
         elif ALG_TYPE.startswith('aug') or ALG_TYPE == 'aug':
             history = AugLagr(net, train_ds,
                               w_idx_train,
@@ -339,7 +348,8 @@ if __name__ == "__main__":
                               maxiter=MAXITER_ALM,
                               device=device,
                               epochs=epochs,
-                              seed=EXP_IDX)
+                              seed=EXP_IDX,
+                              max_runtime=MAX_TIME)
         elif ALG_TYPE.startswith('sslalm'):
             history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
                             loss_bound=LOSS_BOUND,
@@ -354,7 +364,8 @@ if __name__ == "__main__":
                             eta = eta,
                             max_iter=MAXITER_SSLALM,
                             device=device,
-                            seed=EXP_IDX)
+                            seed=EXP_IDX,
+                            max_runtime=MAX_TIME)
         ## SAVE RESULTS ##
         ftrial.append(pd.Series(history['loss']))
         ctrial.append(pd.DataFrame(history['constr']))
