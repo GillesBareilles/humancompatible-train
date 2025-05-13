@@ -7,15 +7,21 @@ import numpy as np
 import torch
 from torch import tensor, nn
 from torch.utils.data import TensorDataset, DataLoader
+from fairret.statistic import *
+from fairret.metric import *
+from fairret.loss import NormLoss
+from copy import deepcopy
+from timeit import timeit
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
-        
-from src.algos.constraints import one_sided_loss_constr
-from src.algos.sslpd import SSLPD
-from src.algos.sw_sub import SwitchingSubgradient_unbiased
-from src.algos.auglag import *
-from src.algos.ghost import StochasticGhost
+
+from src.algorithms.constraints import one_sided_loss_constr
+from src.algorithms.c_utils.constraint import FairnessConstraint
+from src.algorithms.sslpd import SSLPD
+from src.algorithms.sslpdpretty import SSLPD_new
+from src.algorithms.sw_sub import SwitchingSubgradient_unbiased
+from src.algorithms.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
     def __init__(self, in_shape, out_shape, dtype):
@@ -31,23 +37,6 @@ class SimpleNet(nn.Module):
     def forward(self, x):
         logits = self.linear_relu_stack(x)
         return logits
-    
-class SimpleDiffNet(nn.Module):
-    def __init__(self, in_shape, out_shape, dtype):
-        super().__init__()
-        self.linear_gelu_stack = nn.Sequential(
-            nn.Linear(in_shape, 64, dtype=dtype),
-            nn.GELU(),
-            nn.Linear(64, 32, dtype=dtype),
-            nn.GELU(),
-            nn.Linear(32, out_shape, dtype=dtype),
-        )
-
-    def forward(self, x):
-        logits = self.linear_gelu_stack(x)
-        return logits
-    
-
 
 
 
@@ -112,7 +101,7 @@ if __name__ == "__main__":
         epochs = args.epochs
         BATCH_SIZE = args.batch_size
         params_str = f'bs{BATCH_SIZE}'
-    if ALG_TYPE.startswith('fairret'):
+    elif ALG_TYPE.startswith('fairret'):
         epochs = args.epochs
         BATCH_SIZE = args.batch_size
         fconstr = args.fconstr[0]
@@ -338,34 +327,54 @@ if __name__ == "__main__":
                                   maxiter=MAXITER_GHOST,
                                   seed=EXP_IDX,
                                   max_runtime = MAX_TIME)
-        elif ALG_TYPE.startswith('aug') or ALG_TYPE == 'aug':
-            history = AugLagr(net, train_ds,
-                              w_idx_train,
-                              nw_idx_train,
-                              batch_size=BATCH_SIZE,
-                              loss_bound=LOSS_BOUND,
-                              update_lambda=UPDATE_LAMBDA,
-                              maxiter=MAXITER_ALM,
-                              device=device,
-                              epochs=epochs,
-                              seed=EXP_IDX,
-                              max_runtime=MAX_TIME)
+        # elif ALG_TYPE.startswith('aug') or ALG_TYPE == 'aug':
+        #     history = AugLagr(net, train_ds,
+        #                       w_idx_train,
+        #                       nw_idx_train,
+        #                       batch_size=BATCH_SIZE,
+        #                       loss_bound=LOSS_BOUND,
+        #                       update_lambda=UPDATE_LAMBDA,
+        #                       maxiter=MAXITER_ALM,
+        #                       device=device,
+        #                       epochs=epochs,
+        #                       seed=EXP_IDX,
+        #                       max_runtime=MAX_TIME)
         elif ALG_TYPE.startswith('sslalm'):
-            history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
-                            loss_bound=LOSS_BOUND,
-                            fairret_statistic= statistic,
-                            epochs=epochs,
-                            batch_size=BATCH_SIZE,
-                            lambda_bound = 10.,
-                            rho = rho,
-                            mu = mu,
-                            tau = tau,
-                            beta = beta,
-                            eta = eta,
-                            max_iter=MAXITER_SSLALM,
-                            device=device,
-                            seed=EXP_IDX,
-                            max_runtime=MAX_TIME)
+            loss_fn = nn.BCEWithLogitsLoss()
+            cf1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            cf2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            c1 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf1, batch_size=BATCH_SIZE)
+            c2 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf2, batch_size=BATCH_SIZE)
+            
+            history = SSLPD_new(net, train_ds, [c1,c2],
+                                batch_size=BATCH_SIZE,
+                                epochs=epochs,
+                                lambda_bound = 10.,
+                                rho = rho,
+                                mu = mu,
+                                tau = tau,
+                                beta = beta,
+                                eta = eta,
+                                max_iter=MAXITER_SSLALM,
+                                device=device,
+                                seed=EXP_IDX,
+                                max_runtime=MAX_TIME)
+            
+            # history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
+            #                 loss_bound=LOSS_BOUND,
+            #                 fairret_statistic= statistic,
+            #                 epochs=epochs,
+            #                 batch_size=BATCH_SIZE,
+            #                 lambda_bound = 10.,
+            #                 rho = rho,
+            #                 mu = mu,
+            #                 tau = tau,
+            #                 beta = beta,
+            #                 eta = eta,
+            #                 max_iter=MAXITER_SSLALM,
+            #                 device=device,
+            #                 seed=EXP_IDX,
+            #                 max_runtime=MAX_TIME)
         ## SAVE RESULTS ##
         ftrial.append(pd.Series(history['loss']))
         ctrial.append(pd.DataFrame(history['constr']))
@@ -432,14 +441,14 @@ if __name__ == "__main__":
                 if CONSTRAINT == 'loss':
                     c_f = one_sided_loss_constr
                     c_loss_fn = nn.BCEWithLogitsLoss()
-                elif CONSTRAINT == 'fpr':
-                    c_f = fairret_constr
-                    statistic = FalsePositiveRate()
-                    c_loss_fn = NormLoss(statistic)
-                elif CONSTRAINT == 'pr':
-                    c_f = fairret_pr_constr
-                    statistic = PositiveRate()
-                    c_loss_fn = NormLoss(statistic)
+                # elif CONSTRAINT == 'fpr':
+                #     c_f = fairret_constr
+                #     statistic = FalsePositiveRate()
+                #     c_loss_fn = NormLoss(statistic)
+                # elif CONSTRAINT == 'pr':
+                #     c_f = fairret_pr_constr
+                #     statistic = PositiveRate()
+                #     c_loss_fn = NormLoss(statistic)
                 print(f'{exp_idx} | {alg_iteration}', end='\r')
                 # TRANSFER TO CUDA
                 # net.load_state_dict([lw.to(device) for lw in w])

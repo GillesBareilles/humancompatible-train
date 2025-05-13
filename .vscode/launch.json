@@ -10,7 +10,9 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["-state", "OK", "-alg", "aug", "-ne", "5", "-loss_bound","0.005","-task","income", "-constraint","fpr"]
+            // "args": ["-state", "OK", "-alg", "sslalm", "-ne", "5", "-loss_bound","0.005","-task","income", "-constraint","fpr"]
+            "args": ["-state", "OK", "-alg", "sgd", "-ne", "10", "-bs", "8", "-loss_bound", "0.005",
+             "--epochs", "100", "-task", "income", "-constraint", "loss", "-device", "cpu", "-time", "30"]
         }
     ]
 }
