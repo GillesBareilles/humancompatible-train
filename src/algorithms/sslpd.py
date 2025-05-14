@@ -9,12 +9,12 @@ import autoray as ar
 import timeit
 from itertools import cycle
 
-from src.algorithms.constraints import *
+from src.algorithms.c_utils.constraint_fns import *
 from fairret.statistic import *
 # from fairret.metric import *
 from fairret.loss import *
 from .utils import *
-from .constraints import *
+from .c_utils.constraint_fns import *
 import torch
 
 # m_det = 0

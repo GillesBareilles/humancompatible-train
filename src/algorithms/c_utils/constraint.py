@@ -15,15 +15,20 @@ class FairnessConstraint():
             group_indices: Iterable[Iterable[int]],
             fn: Callable,
             batch_size: int = None,
-            use_dataloaders = True
+            use_dataloaders = True,
+            seed=None,
         ):
         self.dataset = dataset
         self.group_sets = [torch.utils.data.Subset(dataset, idx) for idx in group_indices]
         self.fn = fn
+        self.seed = seed
         if not (batch_size is None):
             self.batch_size = batch_size
             if use_dataloaders:
-                self.dataloaders = [cycle(_dataloader_from_subset(dataset, idx, batch_size=batch_size))
+                g = torch.Generator()
+                if not (seed is None):
+                    g.manual_seed(seed)
+                self.dataloaders = [cycle(_dataloader_from_subset(dataset, idx, batch_size=batch_size, shuffle=True, generator=g))
                                     for idx
                                     in group_indices]
         
@@ -35,6 +40,6 @@ class FairnessConstraint():
     
     def sample_dataset(self, N, rng: np.random.Generator=None):
         if rng is None:
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(seed=self.seed)
         # returns len(group) points if N > len(group)
         return [group[rng.choice(N) if N < len(group) else rng.choice(len(group))] for group in self.group_sets]

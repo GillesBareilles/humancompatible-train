@@ -9,13 +9,13 @@ import autoray as ar
 import timeit
 from itertools import cycle
 
-from src.algorithms.constraints import *
+from src.algorithms.c_utils.constraint_fns import *
 from src.algorithms.c_utils.constraint import FairnessConstraint
 from fairret.statistic import *
 # from fairret.metric import *
 from fairret.loss import *
 from .utils import *
-from .constraints import *
+from .c_utils.constraint_fns import *
 import torch
 
 # m_det = 0
@@ -30,7 +30,6 @@ def project(x, m):
         if x[-i] < 0:
             x[-i] = 0
     return x
-
 
 def SSLPD_new(net: torch.nn.Module,
           data: torch.utils.data.Dataset,

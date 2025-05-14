@@ -10,7 +10,7 @@ import autoray as ar
 import timeit
 from itertools import cycle
 
-from src.algorithms.constraints import *
+from src.algorithms.c_utils.constraint_fns import *
 
 from fairret.statistic import *
 from fairret.loss import NormLoss

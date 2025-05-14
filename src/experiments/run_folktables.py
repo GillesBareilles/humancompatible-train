@@ -1,4 +1,5 @@
 import argparse
+from itertools import cycle
 import os
 import sys
 import pandas as pd
@@ -6,21 +7,23 @@ from utils.load_folktables import load_folktables_torch
 import numpy as np
 import torch
 from torch import tensor, nn
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, Subset
 from fairret.statistic import *
 from fairret.metric import *
-from fairret.loss import NormLoss
+from fairret.loss import NormLoss, LSELoss, KLProjectionLoss
 from copy import deepcopy
-from timeit import timeit
+import timeit
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
 
-from src.algorithms.constraints import one_sided_loss_constr
+from src.algorithms.c_utils.constraint_fns import one_sided_loss_constr
 from src.algorithms.c_utils.constraint import FairnessConstraint
 from src.algorithms.sslpd import SSLPD
 from src.algorithms.sslpdpretty import SSLPD_new
-from src.algorithms.sw_sub import SwitchingSubgradient_unbiased
+from src.algorithms.SSLPD_class import SSLPD
+from src.algorithms.sw_subclass import SSSG
+from src.algorithms.sw_subpretty import SwitchingSubgradient_pretty
 from src.algorithms.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
@@ -85,6 +88,8 @@ if __name__ == "__main__":
     
     #fairret
     parser.add_argument('-fconstr', '--fconstr', nargs=1, type=str)
+    parser.add_argument('-losstype', '--losstype', nargs=1, type=str)
+    parser.add_argument('-mult', '--mult', nargs=1, type=float)
 
     # parse args
     args = parser.parse_args()
@@ -105,7 +110,9 @@ if __name__ == "__main__":
         epochs = args.epochs
         BATCH_SIZE = args.batch_size
         fconstr = args.fconstr[0]
-        params_str = f'bs{BATCH_SIZE}c{fconstr}'
+        losstype = args.losstype[0]
+        mult = args.mult[0]
+        params_str = f'bs{BATCH_SIZE}c{fconstr}l{losstype}m{mult}'
     elif ALG_TYPE.startswith('sg'):
         G_ALPHA = args.geomp
         MAXITER_GHOST = 1000 if args.maxiter is None else args.maxiter
@@ -125,6 +132,7 @@ if __name__ == "__main__":
         f_stepsize=args.f_stepsize
         c_stepsize_rule=args.crule
         c_stepsize=args.c_stepsize
+        save_iter = np.inf
         params_str = f'ctol{ctol}fsr{f_stepsize_rule}fs{f_stepsize}csr{c_stepsize_rule}cs{c_stepsize}'
     elif ALG_TYPE.startswith('aug'):
         epochs=args.epochs
@@ -169,6 +177,16 @@ if __name__ == "__main__":
     X_train, y_train, [w_idx_train, nw_idx_train], X_test, y_test, [w_idx_test, nw_idx_test] = load_folktables_torch(
         FT_DATASET, state=FT_STATE.upper(), random_state=42, make_unbalanced = False, onehot=False
     )
+    
+    pos_idx_train = np.argwhere(y_train == 1).flatten()
+    neg_idx_train = np.argwhere(y_train == 0).flatten()
+    pos_idx_test = np.argwhere(y_test == 1).flatten()
+    neg_idx_test = np.argwhere(y_test == 0).flatten()
+    
+    w_idx_train_pos = np.array(set(w_idx_train) & set(pos_idx_train))
+    w_idx_train_neg = np.array(set(w_idx_train) & set(neg_idx_train))
+    nw_idx_train_pos = np.array(set(nw_idx_train) & set(pos_idx_train))
+    nw_idx_train_neg = np.array(set(nw_idx_train) & set(neg_idx_train))
         
     X_train_tensor = tensor(X_train, dtype=DTYPE)
     y_train_tensor = tensor(y_train, dtype=DTYPE)
@@ -225,19 +243,32 @@ if __name__ == "__main__":
         
         
         if ALG_TYPE.startswith('swsg'):
-            # print(epochs)
-            history = SwitchingSubgradient_unbiased(net, train_ds, w_idx_train, nw_idx_train,
-                                                   loss_bound = LOSS_BOUND,
-                                                   batch_size = BATCH_SIZE,
-                                                   epochs = epochs,
-                                                   ctol = ctol,
-                                                   f_stepsize_rule = f_stepsize_rule,
-                                                   f_stepsize = f_stepsize,
-                                                   c_stepsize_rule = c_stepsize_rule,
-                                                   c_stepsize = c_stepsize,
-                                                   device=device,
-                                                   seed=EXP_IDX,
-                                                   max_runtime = MAX_TIME)
+            loss_fn = nn.BCEWithLogitsLoss()
+            cf1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            cf2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            c1 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf1, batch_size=BATCH_SIZE, seed=EXP_IDX)
+            c2 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf2, batch_size=BATCH_SIZE, seed=EXP_IDX)
+            
+            alg = SSSG(net, train_ds, loss_fn, [c1, c2])
+            
+            history = alg.optimize(batch_size = BATCH_SIZE, epochs = epochs,
+                                   ctol = ctol,
+                                   f_stepsize_rule = f_stepsize_rule, f_stepsize = f_stepsize,
+                                   c_stepsize_rule = c_stepsize_rule, c_stepsize = c_stepsize,
+                                   device=device, seed=EXP_IDX, max_runtime = MAX_TIME)
+            
+            # history = SwitchingSubgradient_pretty(net, train_ds, [c1,c2],
+            #                                        batch_size = BATCH_SIZE,
+            #                                        epochs = epochs,
+            #                                        ctol = ctol,
+            #                                        f_stepsize_rule = f_stepsize_rule,
+            #                                        f_stepsize = f_stepsize,
+            #                                        c_stepsize_rule = c_stepsize_rule,
+            #                                        c_stepsize = c_stepsize,
+            #                                        device=device,
+            #                                        seed=EXP_IDX,
+            #                                        max_runtime = MAX_TIME)
+            
             print(len(history['w']))
             
         elif ALG_TYPE.startswith('fairret'):
@@ -251,41 +282,57 @@ if __name__ == "__main__":
                 statistic = FScore()
             elif fconstr == 'acc':
                 statistic = Accuracy()
-            norm_fairret = NormLoss(statistic)
+                
+            if losstype == 'norm':
+                loss_fairret = NormLoss(statistic)
+            elif losstype == 'lse':
+                loss_fairret = LSELoss(statistic)
+            elif losstype == 'kl':
+                loss_fairret = KLProjectionLoss(statistic)
             run_start = timeit.default_timer()
             current_time = timeit.default_timer()
-            data_w = torch.utils.data.Subset(train_ds, w_idx_train)
-            data_b = torch.utils.data.Subset(train_ds, nw_idx_train)
+            data_w = Subset(train_ds, w_idx_train)
+            data_b = Subset(train_ds, nw_idx_train)
+            
             history = {'loss': [], 'constr': [], 'w': [], 'time': [], 'n_samples': []}
             loss_fn = torch.nn.BCEWithLogitsLoss()
             optimizer = torch.optim.SGD(net.parameters(), lr=5e-2)
             for epoch in range(epochs):
                 gen = torch.Generator(device=device)
                 gen.manual_seed(EXP_IDX+epoch)
-                loader_w = torch.utils.data.DataLoader(data_w, BATCH_SIZE, shuffle=True, generator=gen, drop_last=True)
-                loader_b = torch.utils.data.DataLoader(data_b, BATCH_SIZE, shuffle=True, generator=gen, drop_last=True)
+                loader_w = torch.utils.data.DataLoader(data_w, BATCH_SIZE//2, shuffle=True, generator=gen, drop_last=True)
+                loader_b = torch.utils.data.DataLoader(data_b, BATCH_SIZE//2, shuffle=True, generator=gen, drop_last=True)
+                
+                counter = 0
                 for i, ((inputs_w, labels_w), (inputs_b, labels_b)) in enumerate(zip(loader_w, loader_b)):
+                    
                     current_time = timeit.default_timer()
                     elapsed = current_time - run_start
                     if elapsed > MAX_TIME:
                         break
                     history['time'].append(elapsed)
                     history['n_samples'].append(BATCH_SIZE)
+                    
                     net.zero_grad()
-                    if i == len(loader_w):
-                        break
+                    
                     inputs = torch.concat([inputs_w, inputs_b])
                     labels = torch.concat([labels_w, labels_b])
-                    group_ind_onehot = torch.tensor([[0]*BATCH_SIZE + [1]*BATCH_SIZE, [1]*BATCH_SIZE + [0]*BATCH_SIZE]).T
+                    group_ind_onehot = torch.tensor([[0]*(BATCH_SIZE//2) + [1]*(BATCH_SIZE//2), [1]*(BATCH_SIZE//2) + [0]*(BATCH_SIZE//2)]).T
                     outputs = net(inputs)
                     loss_bce = loss_fn(outputs.squeeze(), labels)
+                    counter += outputs.shape[0]
+                    
                     if fconstr == 'pr':
-                        loss_fr = norm_fairret(outputs.squeeze(), group_ind_onehot)
+                        loss_fr = loss_fairret(outputs.squeeze(), group_ind_onehot)
                     else:
-                        loss_fr = norm_fairret(outputs, group_ind_onehot, labels.unsqueeze(1))
-                    loss = loss_bce + 0.1*loss_fr
+                        loss_fr = loss_fairret(outputs, group_ind_onehot, labels.unsqueeze(1))
+                    loss = loss_bce + mult*loss_fr
+                    
                     loss.backward()
                     optimizer.step()
+                    
+                    with np.printoptions(precision=6, suppress=True):
+                        print(f'{epoch:2} | {i:5} | {counter:5} | {loss_bce.detach().cpu().numpy()}|{loss_fr.detach().cpu().numpy()}', end='\r')
                     
                     history['w'].append(deepcopy(net.state_dict()))
                 
@@ -297,10 +344,9 @@ if __name__ == "__main__":
             train_ds = TensorDataset(X_train_tensor.to(device),y_train_tensor.to(device))
             train_l = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
             history = {'loss': [], 'constr': [], 'w': [], 'time': [], 'n_samples': []}
-            for _ in range(epochs):
+            for epoch in range(epochs):
                 for i, (inputs, labels) in enumerate(train_l):
-                    current_time = timeit.default_timer()
-                    elapsed = current_time - run_start
+                    elapsed = timeit.default_timer() - run_start
                     if elapsed > MAX_TIME:
                         break
                     history['time'].append(elapsed)
@@ -312,7 +358,11 @@ if __name__ == "__main__":
                     loss.backward()
                     optimizer.step()
                     
+                    with np.printoptions(precision=6, suppress=True):
+                        print(f'{epoch:2} | {i:5} | {loss.detach().cpu().numpy()}', end='\r')
+                    
                     history['w'].append(deepcopy(net.state_dict()))
+                    
         elif ALG_TYPE.startswith('sg'):
             history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
                                   geomp=G_ALPHA,
@@ -327,27 +377,16 @@ if __name__ == "__main__":
                                   maxiter=MAXITER_GHOST,
                                   seed=EXP_IDX,
                                   max_runtime = MAX_TIME)
-        # elif ALG_TYPE.startswith('aug') or ALG_TYPE == 'aug':
-        #     history = AugLagr(net, train_ds,
-        #                       w_idx_train,
-        #                       nw_idx_train,
-        #                       batch_size=BATCH_SIZE,
-        #                       loss_bound=LOSS_BOUND,
-        #                       update_lambda=UPDATE_LAMBDA,
-        #                       maxiter=MAXITER_ALM,
-        #                       device=device,
-        #                       epochs=epochs,
-        #                       seed=EXP_IDX,
-        #                       max_runtime=MAX_TIME)
+            
         elif ALG_TYPE.startswith('sslalm'):
             loss_fn = nn.BCEWithLogitsLoss()
             cf1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
             cf2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
-            c1 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf1, batch_size=BATCH_SIZE)
-            c2 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf2, batch_size=BATCH_SIZE)
+            c1 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf1, batch_size=BATCH_SIZE, seed=EXP_IDX)
+            c2 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf2, batch_size=BATCH_SIZE, seed=EXP_IDX)
             
-            history = SSLPD_new(net, train_ds, [c1,c2],
-                                batch_size=BATCH_SIZE,
+            alg = SSLPD(net, train_ds, loss_fn, [c1, c2])
+            history = alg.optimize(batch_size=BATCH_SIZE,
                                 epochs=epochs,
                                 lambda_bound = 10.,
                                 rho = rho,
@@ -360,21 +399,6 @@ if __name__ == "__main__":
                                 seed=EXP_IDX,
                                 max_runtime=MAX_TIME)
             
-            # history = SSLPD(net, train_ds, w_idx_train, nw_idx_train,
-            #                 loss_bound=LOSS_BOUND,
-            #                 fairret_statistic= statistic,
-            #                 epochs=epochs,
-            #                 batch_size=BATCH_SIZE,
-            #                 lambda_bound = 10.,
-            #                 rho = rho,
-            #                 mu = mu,
-            #                 tau = tau,
-            #                 beta = beta,
-            #                 eta = eta,
-            #                 max_iter=MAXITER_SSLALM,
-            #                 device=device,
-            #                 seed=EXP_IDX,
-            #                 max_runtime=MAX_TIME)
         ## SAVE RESULTS ##
         ftrial.append(pd.Series(history['loss']))
         ctrial.append(pd.DataFrame(history['constr']))

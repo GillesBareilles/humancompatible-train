@@ -29,3 +29,11 @@ def net_grads_to_tensor(net, clip=False, flatten = True) -> torch.Tensor:
         param_grads = torch.cat(param_grads)
     return param_grads
 
+
+def _set_weights(net: torch.nn.Module, x):
+    start = 0
+    w = net_params_to_tensor(net, flatten=False, copy=False)
+    for i in range(len(w)):
+        end = start + w[i].numel()
+        w[i].set_(x[start:end].reshape(w[i].shape))
+        start = end
