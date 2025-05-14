@@ -13,7 +13,9 @@
             // "args": ["-state", "OK", "-alg", "sslalm", "-ne", "5", "-loss_bound","0.005","-task","income", "-constraint","fpr"]
             // "args": ["-state", "OK", "-alg", "sgd", "-ne", "10", "-bs", "8", "-loss_bound", "0.005",
             //  "--epochs", "100", "-task", "income", "-constraint", "loss", "-device", "cpu", "-time", "30"]
-            "args": ["-state", "OK", "-alg", "fairret", "-ne", "5", "-bs", "24", "-loss_bound", "0.005", "--epochs", "100", "-task", "income", "-constraint", "loss", "-device", "cpu", "--fconstr","acc", "-time", "30", "-losstype", "kl", "-mult", "0.5"]
+            // "args": ["-state", "OK", "-alg", "fairret", "-ne", "5", "-bs", "24", "-loss_bound", "0.005", "--epochs", "100", "-task", "income", "-constraint", "loss", "-device", "cpu", "--fconstr","acc", "-time", "30", "-losstype", "kl", "-mult", "0.5"]
+            // "args": ["-state","OK","-alg","sg","-ne","2","-alpha","0.3","-maxiter","5000","-beta","10.0",
+            // "-gamma0","0.05","-rho","0.8","-lambda","0.5","-zeta","0.05","-tau","1","-stepsize","dimin","-constraint","loss","-task","income","-loss_bound","0.005","-time","30","--alg_name","classtest"]
         }
     ]
 }

@@ -19,11 +19,8 @@ sys.path.append(os.path.dirname(os.path.dirname(parent_dir)))
 
 from src.algorithms.c_utils.constraint_fns import one_sided_loss_constr
 from src.algorithms.c_utils.constraint import FairnessConstraint
-from src.algorithms.sslpd import SSLPD
-from src.algorithms.sslpdpretty import SSLPD_new
-from src.algorithms.SSLPD_class import SSLPD
-from src.algorithms.sw_subclass import SSSG
-from src.algorithms.sw_subpretty import SwitchingSubgradient_pretty
+from src.algorithms.ssl_alm import SSLPD
+from src.algorithms.switching_subgradient import SSSG
 from src.algorithms.ghost import StochasticGhost
 
 class SimpleNet(nn.Module):
@@ -257,18 +254,6 @@ if __name__ == "__main__":
                                    c_stepsize_rule = c_stepsize_rule, c_stepsize = c_stepsize,
                                    device=device, seed=EXP_IDX, max_runtime = MAX_TIME)
             
-            # history = SwitchingSubgradient_pretty(net, train_ds, [c1,c2],
-            #                                        batch_size = BATCH_SIZE,
-            #                                        epochs = epochs,
-            #                                        ctol = ctol,
-            #                                        f_stepsize_rule = f_stepsize_rule,
-            #                                        f_stepsize = f_stepsize,
-            #                                        c_stepsize_rule = c_stepsize_rule,
-            #                                        c_stepsize = c_stepsize,
-            #                                        device=device,
-            #                                        seed=EXP_IDX,
-            #                                        max_runtime = MAX_TIME)
-            
             print(len(history['w']))
             
         elif ALG_TYPE.startswith('fairret'):
@@ -364,8 +349,14 @@ if __name__ == "__main__":
                     history['w'].append(deepcopy(net.state_dict()))
                     
         elif ALG_TYPE.startswith('sg'):
-            history = StochasticGhost(net, train_ds, w_idx_train, nw_idx_train,
-                                  geomp=G_ALPHA,
+            loss_fn = nn.BCEWithLogitsLoss()
+            cf1 = lambda net, d: one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            cf2 = lambda net, d: -one_sided_loss_constr(loss_fn, net, d) - LOSS_BOUND
+            c1 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf1, seed=EXP_IDX)
+            c2 = FairnessConstraint(train_ds, [w_idx_train, nw_idx_train], fn=cf2, seed=EXP_IDX)
+            
+            alg = StochasticGhost(net, train_ds, loss_fn, [c1, c2])
+            history = alg.optimize(geomp=G_ALPHA,
                                   stepsize_rule=ghost_stepsize_rule,
                                   zeta = ghost_zeta,
                                   gamma0 = ghost_gamma0,
@@ -373,8 +364,7 @@ if __name__ == "__main__":
                                   rho=ghost_rho,
                                   lamb = ghost_lambda,
                                   tau = ghost_tau,
-                                  loss_bound=LOSS_BOUND,
-                                  maxiter=MAXITER_GHOST,
+                                  max_iter=MAXITER_GHOST,
                                   seed=EXP_IDX,
                                   max_runtime = MAX_TIME)
             

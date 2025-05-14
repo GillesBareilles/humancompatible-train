@@ -22,6 +22,7 @@ class FairnessConstraint():
         self.group_sets = [torch.utils.data.Subset(dataset, idx) for idx in group_indices]
         self.fn = fn
         self.seed = seed
+        self.rng = np.random.default_rng(seed)
         if not (batch_size is None):
             self.batch_size = batch_size
             if use_dataloaders:
@@ -32,14 +33,28 @@ class FairnessConstraint():
                                     for idx
                                     in group_indices]
         
+    def group_sizes(self):
+        return [len(group) for group in self.group_sets]
+    
     def eval(self, net, sample, **kwargs):
         return self.fn(net, sample, **kwargs)
     
     def sample_loader(self):
         return [next(l) for l in self.dataloaders]
     
-    def sample_dataset(self, N, rng: np.random.Generator=None):
+    def sample_dataset(self, N, rng: np.random.Generator = None, indices = None, return_indices = False):
         if rng is None:
-            rng = np.random.default_rng(seed=self.seed)
-        # returns len(group) points if N > len(group)
-        return [group[rng.choice(N) if N < len(group) else rng.choice(len(group))] for group in self.group_sets]
+            rng = self.rng
+        
+        if indices is None:
+            indices = []
+            # returns len(group) points if N > len(group)
+            for group in self.group_sets:
+                indices.append(rng.choice(group.indices, N) if N < len(group) else rng.choice(group.indices, len(group)))
+        
+        sample = [self.dataset[indices[i]] for i, _ in enumerate(self.group_sets)]
+        
+        if return_indices:
+            return sample, indices
+        else:
+            return sample
